@@ -126,3 +126,67 @@ export async function unassignAssistantFromEvent(
     notifiedCount: data.notifiedCount
   };
 }
+
+export async function updateUpcomingZoomEvent(
+  eventoId: string,
+  payload: {
+    titulo?: string;
+    programaNombre?: string;
+    responsableNombre?: string;
+    descripcion?: string;
+    inicioProgramadoAt?: string;
+    finProgramadoAt?: string;
+    timezone?: string;
+  }
+): Promise<{
+  success: boolean;
+  error?: string;
+  result?: {
+    updated: boolean;
+    eventoId: string;
+    solicitudId: string;
+    zoomMeetingId?: string | null;
+    changes?: {
+      titleChanged: boolean;
+      programChanged: boolean;
+      responsibleChanged: boolean;
+      descriptionChanged: boolean;
+      scheduleChanged: boolean;
+    };
+  };
+}> {
+  const response = await fetch(`/api/v1/eventos-zoom/${eventoId}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload)
+  });
+
+  const data = (await response.json()) as {
+    error?: string;
+    result?: {
+      updated: boolean;
+      eventoId: string;
+      solicitudId: string;
+      zoomMeetingId?: string | null;
+      changes?: {
+        titleChanged: boolean;
+        programChanged: boolean;
+        responsibleChanged: boolean;
+        descriptionChanged: boolean;
+        scheduleChanged: boolean;
+      };
+    };
+  };
+
+  if (!response.ok) {
+    return {
+      success: false,
+      error: data.error ?? "No se pudo actualizar la reunion."
+    };
+  }
+
+  return {
+    success: true,
+    result: data.result
+  };
+}

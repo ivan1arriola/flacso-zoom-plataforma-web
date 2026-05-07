@@ -1,6 +1,7 @@
 import {
   CuentaZoom,
   EstadoAsignacion,
+  EstadoEnvioNotificacion,
   EstadoEjecucionEvento,
   EstadoCoberturaSoporte,
   EstadoEventoZoom,
@@ -23,6 +24,12 @@ import { env } from "@/src/lib/env";
 import { EmailClient } from "@/src/lib/email.client";
 import { uploadFileToDriveFolder } from "@/src/lib/google-drive.client";
 import { logger } from "@/src/lib/logger";
+import {
+  NOTIF_ACTIVITY_ZOOM_ASSISTANT_ASSIGNED,
+  NOTIF_ACTIVITY_ZOOM_ASSISTANT_MEETING_UPDATED,
+  NOTIF_ACTIVITY_ZOOM_ASSISTANT_UNASSIGNED,
+  NOTIF_ACTIVITY_ZOOM_MONITORING_REQUIRED
+} from "@/src/lib/notification-activity";
 import { notifyAdminInAppMovement } from "@/src/lib/admin-notifications.client";
 import { sendPushToUser, sendPushToUserByEmail } from "@/src/lib/push";
 import { ZoomApiError, ZoomMeetingsClient } from "@/src/lib/zoom-meetings.client";
@@ -1174,23 +1181,40 @@ async function sendBroadcastEmail(input: {
   });
 }
 
-async function listAssistantPoolEmails(): Promise<string[]> {
+type AssistantPoolRecipient = {
+  id: string;
+  email: string;
+};
+
+async function listAssistantPoolRecipients(): Promise<AssistantPoolRecipient[]> {
   const users = await db.user.findMany({
     where: {
       emailVerified: { not: null },
       role: { in: [...LEGACY_ASSISTANT_ROLES] },
       email: { not: "" }
     },
-    select: { email: true }
+    select: {
+      id: true,
+      email: true
+    }
   });
 
-  const unique = new Set<string>();
+  const dedupByUserId = new Map<string, AssistantPoolRecipient>();
   for (const user of users) {
     const normalized = (user.email ?? "").trim().toLowerCase();
     if (!EMAIL_LINE_REGEX.test(normalized)) continue;
-    unique.add(normalized);
+    dedupByUserId.set(user.id, {
+      id: user.id,
+      email: normalized
+    });
   }
 
+  return Array.from(dedupByUserId.values());
+}
+
+async function listAssistantPoolEmails(): Promise<string[]> {
+  const recipients = await listAssistantPoolRecipients();
+  const unique = new Set(recipients.map((item) => item.email));
   return Array.from(unique);
 }
 
@@ -1228,6 +1252,130 @@ async function sendMonitoringRequiredEmailToAssistantPool(input: {
     subject,
     html
   });
+}
+
+async function sendMonitoringRequiredInAppToAssistantPool(input: {
+  solicitudId: string;
+  titulo: string;
+  modalidad: ModalidadReunion;
+  programaNombre?: string | null;
+  responsableNombre?: string | null;
+  timezone: string;
+  instanceStarts: Date[];
+  estadoSolicitud: EstadoSolicitudSala;
+}): Promise<number> {
+  const recipients = await listAssistantPoolRecipients();
+  if (recipients.length === 0) return 0;
+
+  const safeTimezone = input.timezone || "America/Montevideo";
+  const sortedStarts = [...input.instanceStarts].sort((a, b) => a.getTime() - b.getTime());
+  const firstStart = sortedStarts[0] ?? null;
+  const lastStart = sortedStarts[sortedStarts.length - 1] ?? null;
+  const hasMultipleInstances = sortedStarts.length > 1;
+  const asuntoBase = `Nueva solicitud con asistencia Zoom: ${input.titulo || input.solicitudId}`;
+  const asunto =
+    asuntoBase.length <= 180 ? asuntoBase : `${asuntoBase.slice(0, 177)}...`;
+
+  const lines = [
+    "Se registro una nueva solicitud que requiere asistencia Zoom.",
+    `Solicitud ID: ${input.solicitudId}`,
+    `Titulo: ${input.titulo}`,
+    `Modalidad: ${input.modalidad}`,
+    `Estado: ${input.estadoSolicitud}`,
+    `Instancias: ${sortedStarts.length}`,
+    firstStart
+      ? `Primera instancia: ${formatEventDateForNotification(firstStart, safeTimezone)}`
+      : null,
+    hasMultipleInstances && lastStart
+      ? `Ultima instancia: ${formatEventDateForNotification(lastStart, safeTimezone)}`
+      : null,
+    input.programaNombre?.trim() ? `Programa: ${input.programaNombre.trim()}` : null,
+    input.responsableNombre?.trim() ? `Responsable: ${input.responsableNombre.trim()}` : null,
+    `Zona horaria: ${safeTimezone}`
+  ].filter((line): line is string => Boolean(line));
+
+  const now = new Date();
+  const result = await db.notificacion.createMany({
+    data: recipients.map((recipient) => ({
+      usuarioId: recipient.id,
+      tipoNotificacion: TipoNotificacion.ALERTA_OPERATIVA,
+      canalDestino: "IN_APP",
+      asunto,
+      cuerpo: lines.join("\n"),
+      estadoEnvio: EstadoEnvioNotificacion.ENVIADA,
+      intentoCount: 1,
+      ultimoIntentoAt: now,
+      entidadReferenciaTipo: NOTIF_ACTIVITY_ZOOM_MONITORING_REQUIRED,
+      entidadReferenciaId: input.solicitudId
+    }))
+  });
+
+  return result.count;
+}
+
+type InternalAssistantNotificationInput = {
+  userIds: string[];
+  asunto: string;
+  cuerpoLineas: Array<string | null | undefined>;
+  entidadReferenciaTipo: string;
+  entidadReferenciaId?: string | null;
+  push?: {
+    title: string;
+    body: string;
+    url?: string;
+    tag?: string;
+  };
+};
+
+async function createAssistantInternalNotifications(
+  input: InternalAssistantNotificationInput
+): Promise<number> {
+  const uniqueUserIds = Array.from(
+    new Set(
+      input.userIds
+        .map((value) => value.trim())
+        .filter(Boolean)
+    )
+  );
+  if (uniqueUserIds.length === 0) return 0;
+
+  const lines = input.cuerpoLineas
+    .map((line) => (line ?? "").trim())
+    .filter(Boolean);
+  const body = lines.length > 0 ? lines.join("\n") : input.asunto;
+  const now = new Date();
+
+  const result = await db.notificacion.createMany({
+    data: uniqueUserIds.map((usuarioId) => ({
+      usuarioId,
+      tipoNotificacion: TipoNotificacion.ALERTA_OPERATIVA,
+      canalDestino: "IN_APP",
+      asunto: input.asunto,
+      cuerpo: body,
+      estadoEnvio: EstadoEnvioNotificacion.ENVIADA,
+      intentoCount: 1,
+      ultimoIntentoAt: now,
+      entidadReferenciaTipo: input.entidadReferenciaTipo,
+      entidadReferenciaId: input.entidadReferenciaId ?? null
+    }))
+  });
+
+  if (input.push) {
+    const pushPayload = input.push;
+    await Promise.all(
+      uniqueUserIds.map((usuarioId) =>
+        sendPushToUser(usuarioId, pushPayload).catch((error) => {
+          logger.warn("No se pudo enviar notificacion push al asistente.", {
+            usuarioId,
+            asunto: input.asunto,
+            error: error instanceof Error ? error.message : String(error)
+          });
+        })
+      )
+    );
+  }
+
+  return result.count;
 }
 
 async function sendDocenteSolicitudCreatedEmailToAdmins(input: {
@@ -3874,6 +4022,7 @@ export class SalasService {
                   select: {
                     usuario: {
                       select: {
+                        id: true,
                         email: true,
                         name: true,
                         firstName: true,
@@ -4123,6 +4272,7 @@ export class SalasService {
                   select: {
                     usuario: {
                       select: {
+                        id: true,
                         email: true,
                         name: true,
                         firstName: true,
@@ -4272,6 +4422,7 @@ export class SalasService {
                   select: {
                     usuario: {
                       select: {
+                        id: true,
                         email: true,
                         name: true,
                         firstName: true,
@@ -4451,9 +4602,16 @@ export class SalasService {
     const eventsToDisableIds = eventsToDisable.map((event) => event.id);
 
     const recipientsByEmail = new Map<string, AssistanceCancellationRecipient>();
+    const recipientsByUserId = new Map<string, { userId: string; nombre: string }>();
     for (const event of eventsToDisable) {
       for (const assignment of event.asignaciones) {
         const monitor = assignment.asistente.usuario;
+        if (monitor.id) {
+          recipientsByUserId.set(monitor.id, {
+            userId: monitor.id,
+            nombre: getUserDisplayName(monitor)
+          });
+        }
         const monitorEmail = (monitor.email ?? "").trim().toLowerCase();
         if (!EMAIL_LINE_REGEX.test(monitorEmail)) continue;
 
@@ -4558,6 +4716,36 @@ export class SalasService {
       recipients: Array.from(recipientsByEmail.values())
     });
 
+    const timezone = solicitud.timezone || "America/Montevideo";
+    const affectedDates = eventsToDisable
+      .map((event) => formatEventDateForNotification(event.inicioProgramadoAt, timezone))
+      .join(" | ");
+    await createAssistantInternalNotifications({
+      userIds: Array.from(recipientsByUserId.keys()),
+      asunto: `Asistencia Zoom cancelada: ${solicitud.titulo || solicitud.id}`,
+      cuerpoLineas: [
+        "La asistencia Zoom fue deshabilitada para esta solicitud.",
+        `Solicitud ID: ${solicitud.id}`,
+        `Motivo: ${motivo}`,
+        `Instancias afectadas: ${eventsToDisable.length}`,
+        affectedDates ? `Fechas: ${affectedDates}` : null,
+        `Actualizado por: ${getUserDisplayName(user)}`
+      ],
+      entidadReferenciaTipo: NOTIF_ACTIVITY_ZOOM_ASSISTANT_UNASSIGNED,
+      entidadReferenciaId: solicitud.id,
+      push: {
+        title: "Asistencia Zoom cancelada",
+        body: `Se deshabilito asistencia para "${solicitud.titulo}".`,
+        url: "/?tab=notificaciones",
+        tag: "zoom-unassignment"
+      }
+    }).catch((error) => {
+      logger.warn("No se pudo registrar notificacion interna por deshabilitar asistencia en solicitud.", {
+        solicitudId: solicitud.id,
+        error: error instanceof Error ? error.message : String(error)
+      });
+    });
+
     return {
       solicitudId: solicitud.id,
       requiereAsistencia: false,
@@ -4624,6 +4812,7 @@ export class SalasService {
                   select: {
                     usuario: {
                       select: {
+                        id: true,
                         email: true,
                         name: true,
                         firstName: true,
@@ -4839,8 +5028,15 @@ export class SalasService {
       "Asistencia Zoom deshabilitada para una instancia puntual desde la pestana Solicitudes.";
 
     const recipientsByEmail = new Map<string, AssistanceCancellationRecipient>();
+    const recipientsByUserId = new Map<string, { userId: string; nombre: string }>();
     for (const assignment of targetEvent.asignaciones) {
       const monitor = assignment.asistente.usuario;
+      if (monitor.id) {
+        recipientsByUserId.set(monitor.id, {
+          userId: monitor.id,
+          nombre: getUserDisplayName(monitor)
+        });
+      }
       const monitorEmail = (monitor.email ?? "").trim().toLowerCase();
       if (!EMAIL_LINE_REGEX.test(monitorEmail)) continue;
 
@@ -4960,6 +5156,33 @@ export class SalasService {
       actorEmail: user.email,
       motivo,
       recipients: Array.from(recipientsByEmail.values())
+    });
+
+    await createAssistantInternalNotifications({
+      userIds: Array.from(recipientsByUserId.keys()),
+      asunto: `Asistencia Zoom cancelada: ${solicitud.titulo || solicitud.id}`,
+      cuerpoLineas: [
+        "La asistencia Zoom fue deshabilitada para una instancia puntual.",
+        `Solicitud ID: ${solicitud.id}`,
+        `Evento ID: ${targetEvent.id}`,
+        `Fecha: ${formatEventDateForNotification(targetEvent.inicioProgramadoAt, solicitud.timezone || "America/Montevideo")}`,
+        `Motivo: ${motivo}`,
+        `Actualizado por: ${getUserDisplayName(user)}`
+      ],
+      entidadReferenciaTipo: NOTIF_ACTIVITY_ZOOM_ASSISTANT_UNASSIGNED,
+      entidadReferenciaId: targetEvent.id,
+      push: {
+        title: "Asistencia de instancia cancelada",
+        body: `Se cancelo tu asistencia en "${solicitud.titulo}".`,
+        url: "/?tab=notificaciones",
+        tag: "zoom-unassignment"
+      }
+    }).catch((error) => {
+      logger.warn("No se pudo registrar notificacion interna por deshabilitar asistencia en instancia.", {
+        solicitudId: solicitud.id,
+        eventoId: targetEvent.id,
+        error: error instanceof Error ? error.message : String(error)
+      });
     });
 
     return {
@@ -5693,6 +5916,24 @@ export class SalasService {
         instancePlans.map((plan) => plan.inicio)
       );
 
+      if (input.requiereAsistencia ?? false) {
+        await sendMonitoringRequiredInAppToAssistantPool({
+          solicitudId: created.id,
+          titulo: input.titulo,
+          modalidad: input.modalidadReunion,
+          programaNombre: input.programaNombre ?? null,
+          responsableNombre: input.responsableNombre ?? null,
+          timezone,
+          instanceStarts: instancePlans.map((plan) => plan.inicio),
+          estadoSolicitud: EstadoSolicitudSala.PENDIENTE_RESOLUCION_MANUAL_ID
+        }).catch((error) => {
+          logger.warn("No se pudo enviar notificacion interna al pool de asistentes Zoom (sin cuentas disponibles).", {
+            solicitudId: created.id,
+            error: error instanceof Error ? error.message : String(error)
+          });
+        });
+      }
+
       return created;
     }
     let assignedAccount: CuentaZoom | null = requireManualResolution ? availableAccounts[0] : null;
@@ -5843,6 +6084,24 @@ export class SalasService {
           EstadoSolicitudSala.PENDIENTE_RESOLUCION_MANUAL_ID,
           instancePlans.map((plan) => plan.inicio)
         );
+
+        if (input.requiereAsistencia ?? false) {
+          await sendMonitoringRequiredInAppToAssistantPool({
+            solicitudId: created.id,
+            titulo: input.titulo,
+            modalidad: input.modalidadReunion,
+            programaNombre: input.programaNombre ?? null,
+            responsableNombre: input.responsableNombre ?? null,
+            timezone,
+            instanceStarts: instancePlans.map((plan) => plan.inicio),
+            estadoSolicitud: EstadoSolicitudSala.PENDIENTE_RESOLUCION_MANUAL_ID
+          }).catch((error) => {
+            logger.warn("No se pudo enviar notificacion interna al pool de asistentes Zoom (provision automatica fallida).", {
+              solicitudId: created.id,
+              error: error instanceof Error ? error.message : String(error)
+            });
+          });
+        }
 
         return created;
       }
@@ -6055,6 +6314,22 @@ export class SalasService {
         provisionedPlans.length > 0
           ? provisionedPlans.map((plan) => plan.inicio)
           : instancePlans.map((plan) => plan.inicio);
+
+      await sendMonitoringRequiredInAppToAssistantPool({
+        solicitudId: result.id,
+        titulo: input.titulo,
+        modalidad: input.modalidadReunion,
+        programaNombre: input.programaNombre ?? null,
+        responsableNombre: input.responsableNombre ?? null,
+        timezone,
+        instanceStarts: startsForAssistantPool,
+        estadoSolicitud: status
+      }).catch((error) => {
+        logger.warn("No se pudo enviar notificacion interna al pool de asistentes Zoom.", {
+          solicitudId: result.id,
+          error: error instanceof Error ? error.message : String(error)
+        });
+      });
 
       await sendMonitoringRequiredEmailToAssistantPool({
         solicitudId: result.id,
@@ -8365,6 +8640,7 @@ export class SalasService {
         id: true,
         usuario: {
           select: {
+            id: true,
             email: true,
             role: true,
             name: true,
@@ -8383,6 +8659,19 @@ export class SalasService {
       throw new Error("Solo se puede asignar personal con rol de asistencia Zoom.");
     }
 
+    const alreadyAssigned = await db.asignacionAsistente.findFirst({
+      where: {
+        eventoZoomId: eventoId,
+        asistenteZoomId: input.asistenteZoomId,
+        tipoAsignacion: TipoAsignacionAsistente.PRINCIPAL,
+        estadoAsignacion: { in: [EstadoAsignacion.ASIGNADO, EstadoAsignacion.ACEPTADO] }
+      },
+      select: { id: true }
+    });
+    if (alreadyAssigned) {
+      throw new Error("La persona seleccionada ya esta asignada a esta reunion.");
+    }
+
     const rate = await getActiveRate(event.modalidadReunion);
     if (!rate) {
       throw new Error("No hay tarifa activa para la modalidad del evento.");
@@ -8394,7 +8683,7 @@ export class SalasService {
     );
     const hourlyRate = Number(rate.valorHora);
 
-    const assignment = await db.$transaction(async (tx) => {
+    const assignmentResult = await db.$transaction(async (tx) => {
       const existingAssignments = await tx.asignacionAsistente.findMany({
         where: {
           asistenteZoomId: input.asistenteZoomId,
@@ -8408,6 +8697,31 @@ export class SalasService {
               inicioProgramadoAt: true,
               finProgramadoAt: true,
               estadoEvento: true
+            }
+          }
+        }
+      });
+
+      const activePrincipalAssignments = await tx.asignacionAsistente.findMany({
+        where: {
+          eventoZoomId: eventoId,
+          tipoAsignacion: TipoAsignacionAsistente.PRINCIPAL,
+          estadoAsignacion: { in: [EstadoAsignacion.ASIGNADO, EstadoAsignacion.ACEPTADO] }
+        },
+        select: {
+          id: true,
+          asistenteZoomId: true,
+          asistente: {
+            select: {
+              usuario: {
+                select: {
+                  id: true,
+                  email: true,
+                  name: true,
+                  firstName: true,
+                  lastName: true
+                }
+              }
             }
           }
         }
@@ -8480,8 +8794,15 @@ export class SalasService {
         }
       });
 
-      return assignment;
+      return {
+        assignment,
+        replacedAssignments: activePrincipalAssignments
+      };
     });
+    const assignment = assignmentResult.assignment;
+    const replacedAssignments = assignmentResult.replacedAssignments.filter(
+      (item) => item.asistenteZoomId !== input.asistenteZoomId
+    );
 
     await notifyAdminInAppMovement({
       action: "ASIGNACION_ASISTENTE_CREADA",
@@ -8531,6 +8852,80 @@ export class SalasService {
       });
     });
 
+    const timezone = event.timezone || "America/Montevideo";
+    const fechaReunion = formatEventDateForNotification(event.inicioProgramadoAt, timezone);
+    const programaLabel = event.solicitud.programaNombre?.trim() || null;
+    const actorDisplayName = getUserDisplayName(admin);
+
+    await createAssistantInternalNotifications({
+      userIds: [selectedAssistant.usuario.id],
+      asunto: `Asignacion Zoom confirmada: ${event.solicitud.titulo || event.solicitud.id}`,
+      cuerpoLineas: [
+        "Fuiste asignado/a para brindar asistencia Zoom.",
+        `Reunion: ${event.solicitud.titulo}`,
+        `Fecha: ${fechaReunion}`,
+        programaLabel ? `Programa: ${programaLabel}` : null,
+        `Solicitud ID: ${event.solicitud.id}`,
+        `Evento ID: ${event.id}`,
+        `Asignado por: ${actorDisplayName}`
+      ],
+      entidadReferenciaTipo: NOTIF_ACTIVITY_ZOOM_ASSISTANT_ASSIGNED,
+      entidadReferenciaId: event.id,
+      push: {
+        title: "Nueva asignacion Zoom",
+        body: `Se te asigno la reunion "${event.solicitud.titulo}" (${fechaReunion}).`,
+        url: "/?tab=notificaciones",
+        tag: "zoom-assignment"
+      }
+    }).catch((error) => {
+      logger.warn("No se pudo registrar notificacion interna de asignacion.", {
+        eventoId,
+        solicitudId: event.solicitud.id,
+        asistenteZoomId: input.asistenteZoomId,
+        error: error instanceof Error ? error.message : String(error)
+      });
+    });
+
+    if (replacedAssignments.length > 0) {
+      const previousAssistantIds = replacedAssignments
+        .map((item) => item.asistente.usuario.id)
+        .filter(Boolean);
+      const previousAssistantNames = replacedAssignments
+        .map((item) => getUserDisplayName(item.asistente.usuario))
+        .filter(Boolean);
+
+      await createAssistantInternalNotifications({
+        userIds: previousAssistantIds,
+        asunto: `Asignacion Zoom reasignada: ${event.solicitud.titulo || event.solicitud.id}`,
+        cuerpoLineas: [
+          "Tu asignacion de asistencia Zoom fue removida por reasignacion.",
+          `Reunion: ${event.solicitud.titulo}`,
+          `Fecha: ${fechaReunion}`,
+          programaLabel ? `Programa: ${programaLabel}` : null,
+          `Solicitud ID: ${event.solicitud.id}`,
+          `Evento ID: ${event.id}`,
+          `Reasignado por: ${actorDisplayName}`,
+          previousAssistantNames.length > 0
+            ? `Asistentes reasignados: ${previousAssistantNames.join(", ")}`
+            : null
+        ],
+        entidadReferenciaTipo: NOTIF_ACTIVITY_ZOOM_ASSISTANT_UNASSIGNED,
+        entidadReferenciaId: event.id,
+        push: {
+          title: "Asignacion Zoom removida",
+          body: `Tu asignacion para "${event.solicitud.titulo}" fue reasignada.`,
+          url: "/?tab=notificaciones",
+          tag: "zoom-unassignment"
+        }
+      }).catch((error) => {
+        logger.warn("No se pudo registrar notificacion interna de reasignacion.", {
+          eventoId,
+          solicitudId: event.solicitud.id,
+          error: error instanceof Error ? error.message : String(error)
+        });
+      });
+    }
+
     return assignment;
   }
 
@@ -8554,8 +8949,19 @@ export class SalasService {
     if (!event.requiereAsistencia) throw new Error("El evento no requiere asistencia.");
 
     const recipientsByEmail = new Map<string, AssistanceCancellationRecipient>();
+    const assistantRecipientsByUserId = new Map<
+      string,
+      { userId: string; email: string; nombre: string }
+    >();
     for (const assignment of event.asignaciones) {
       const monitor = assignment.asistente.usuario;
+      if (monitor.id) {
+        assistantRecipientsByUserId.set(monitor.id, {
+          userId: monitor.id,
+          email: (monitor.email ?? "").trim().toLowerCase(),
+          nombre: getUserDisplayName(monitor)
+        });
+      }
       const monitorEmail = (monitor.email ?? "").trim().toLowerCase();
       if (!EMAIL_LINE_REGEX.test(monitorEmail)) continue;
 
@@ -8634,9 +9040,561 @@ export class SalasService {
       recipients: Array.from(recipientsByEmail.values())
     });
 
+    const timezone = event.timezone || event.solicitud.timezone || "America/Montevideo";
+    const fechaReunion = formatEventDateForNotification(event.inicioProgramadoAt, timezone);
+    const programaLabel = event.solicitud.programaNombre?.trim() || null;
+
+    await createAssistantInternalNotifications({
+      userIds: Array.from(assistantRecipientsByUserId.keys()),
+      asunto: `Asistencia Zoom desasignada: ${event.solicitud.titulo || event.solicitud.id}`,
+      cuerpoLineas: [
+        "Tu asistencia Zoom fue desasignada manualmente.",
+        `Reunion: ${event.solicitud.titulo}`,
+        `Fecha: ${fechaReunion}`,
+        programaLabel ? `Programa: ${programaLabel}` : null,
+        `Solicitud ID: ${event.solicitud.id}`,
+        `Evento ID: ${event.id}`,
+        `Desasignado por: ${getUserDisplayName(admin)}`,
+        input?.motivo?.trim() ? `Motivo: ${input.motivo.trim()}` : null
+      ],
+      entidadReferenciaTipo: NOTIF_ACTIVITY_ZOOM_ASSISTANT_UNASSIGNED,
+      entidadReferenciaId: event.id,
+      push: {
+        title: "Asistencia desasignada",
+        body: `Se desasigno tu asistencia para "${event.solicitud.titulo}".`,
+        url: "/?tab=notificaciones",
+        tag: "zoom-unassignment"
+      }
+    }).catch((error) => {
+      logger.warn("No se pudo registrar notificacion interna de desasignacion.", {
+        eventoId,
+        solicitudId: event.solicitud.id,
+        error: error instanceof Error ? error.message : String(error)
+      });
+    });
+
     return {
       cancelledCount,
       notifiedCount
+    };
+  }
+
+  async updateUpcomingEvent(
+    user: SessionUser,
+    eventoId: string,
+    input: {
+      titulo?: string;
+      programaNombre?: string;
+      responsableNombre?: string;
+      descripcion?: string;
+      inicioProgramadoAt?: string;
+      finProgramadoAt?: string;
+      timezone?: string;
+    }
+  ) {
+    const event = await db.eventoZoom.findUnique({
+      where: { id: eventoId },
+      select: {
+        id: true,
+        solicitudSalaId: true,
+        modalidadReunion: true,
+        inicioProgramadoAt: true,
+        finProgramadoAt: true,
+        timezone: true,
+        requiereAsistencia: true,
+        estadoCobertura: true,
+        estadoEvento: true,
+        agendaCierraAt: true,
+        zoomMeetingId: true,
+        zoomJoinUrl: true,
+        zoomPayloadUltimo: true,
+        sincronizadoConZoomAt: true,
+        costoEstimado: true,
+        solicitud: {
+          select: {
+            id: true,
+            createdByUserId: true,
+            titulo: true,
+            programaNombre: true,
+            responsableNombre: true,
+            descripcion: true,
+            timezone: true,
+            meetingPrincipalId: true,
+            docente: {
+              select: {
+                usuarioId: true
+              }
+            }
+          }
+        },
+        asignaciones: {
+          where: {
+            tipoAsignacion: TipoAsignacionAsistente.PRINCIPAL,
+            estadoAsignacion: { in: [EstadoAsignacion.ASIGNADO, EstadoAsignacion.ACEPTADO] }
+          },
+          select: {
+            asistenteZoomId: true,
+            asistente: {
+              select: {
+                usuario: {
+                  select: {
+                    id: true,
+                    email: true,
+                    name: true,
+                    firstName: true,
+                    lastName: true
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    });
+
+    if (!event) throw new Error("Evento no encontrado.");
+    if (
+      event.estadoEvento === EstadoEventoZoom.CANCELADO ||
+      event.estadoEvento === EstadoEventoZoom.FINALIZADO
+    ) {
+      throw new Error("No se puede editar una reunion cancelada o finalizada.");
+    }
+    if (event.finProgramadoAt <= new Date()) {
+      throw new Error("Solo se pueden editar reuniones pendientes.");
+    }
+
+    const canManageAsAdmin = user.role === UserRole.ADMINISTRADOR;
+    const isOwner =
+      event.solicitud.createdByUserId === user.id || event.solicitud.docente.usuarioId === user.id;
+    if (!canManageAsAdmin && !isOwner) {
+      throw new Error("No tienes permisos para editar esta reunion.");
+    }
+
+    const previousTitle = event.solicitud.titulo;
+    const previousProgram = event.solicitud.programaNombre ?? "";
+    const previousResponsible = event.solicitud.responsableNombre ?? "";
+    const previousDescription = event.solicitud.descripcion ?? "";
+    const previousTimezone = event.timezone || event.solicitud.timezone || "America/Montevideo";
+    const previousStart = event.inicioProgramadoAt;
+    const previousEnd = event.finProgramadoAt;
+
+    const hasStartInput = typeof input.inicioProgramadoAt === "string" && input.inicioProgramadoAt.trim().length > 0;
+    const hasEndInput = typeof input.finProgramadoAt === "string" && input.finProgramadoAt.trim().length > 0;
+    const hasTimezoneInput = typeof input.timezone === "string";
+
+    const normalizedTitle =
+      typeof input.titulo === "string" ? input.titulo.trim() : previousTitle;
+    if (!normalizedTitle) {
+      throw new Error("titulo es obligatorio.");
+    }
+
+    const normalizedProgram =
+      typeof input.programaNombre === "string"
+        ? input.programaNombre.trim()
+        : previousProgram;
+    const normalizedResponsible =
+      typeof input.responsableNombre === "string"
+        ? input.responsableNombre.trim()
+        : previousResponsible;
+    const normalizedDescriptionRaw =
+      typeof input.descripcion === "string"
+        ? input.descripcion.trim()
+        : previousDescription;
+    const normalizedDescription = normalizedDescriptionRaw || null;
+
+    const originalDurationMs = Math.max(
+      60_000,
+      previousEnd.getTime() - previousStart.getTime()
+    );
+
+    const nextStart = hasStartInput
+      ? toDate(input.inicioProgramadoAt as string, "inicioProgramadoAt")
+      : previousStart;
+    let nextEnd: Date;
+    if (hasEndInput) {
+      nextEnd = toDate(input.finProgramadoAt as string, "finProgramadoAt");
+    } else if (hasStartInput) {
+      nextEnd = new Date(nextStart.getTime() + originalDurationMs);
+    } else {
+      nextEnd = previousEnd;
+    }
+
+    if (nextEnd <= nextStart) {
+      throw new Error("finProgramadoAt debe ser mayor que inicioProgramadoAt.");
+    }
+    if (nextEnd <= new Date()) {
+      throw new Error("La reunion debe quedar programada a futuro.");
+    }
+
+    const nextTimezone =
+      hasTimezoneInput && (input.timezone ?? "").trim().length > 0
+        ? (input.timezone as string).trim()
+        : previousTimezone;
+
+    const titleChanged = normalizedTitle !== previousTitle;
+    const programChanged = normalizedProgram !== previousProgram;
+    const responsibleChanged = normalizedResponsible !== previousResponsible;
+    const descriptionChanged = normalizedDescriptionRaw !== previousDescription;
+    const scheduleChanged =
+      nextStart.getTime() !== previousStart.getTime() ||
+      nextEnd.getTime() !== previousEnd.getTime() ||
+      nextTimezone !== previousTimezone;
+
+    const hasChanges =
+      titleChanged || programChanged || responsibleChanged || descriptionChanged || scheduleChanged;
+    if (!hasChanges) {
+      return {
+        updated: false,
+        eventoId,
+        solicitudId: event.solicitud.id
+      };
+    }
+
+    const assignedAssistantIds = Array.from(
+      new Set(event.asignaciones.map((assignment) => assignment.asistenteZoomId))
+    );
+    if (scheduleChanged && assignedAssistantIds.length > 0) {
+      const overlappingAssignments = await db.asignacionAsistente.findMany({
+        where: {
+          eventoZoomId: { not: eventoId },
+          asistenteZoomId: { in: assignedAssistantIds },
+          estadoAsignacion: { in: [EstadoAsignacion.ASIGNADO, EstadoAsignacion.ACEPTADO] }
+        },
+        select: {
+          asistenteZoomId: true,
+          evento: {
+            select: {
+              inicioProgramadoAt: true,
+              finProgramadoAt: true,
+              estadoEvento: true
+            }
+          },
+          asistente: {
+            select: {
+              usuario: {
+                select: {
+                  email: true,
+                  name: true,
+                  firstName: true,
+                  lastName: true
+                }
+              }
+            }
+          }
+        }
+      });
+
+      for (const assignment of overlappingAssignments) {
+        const otherEvent = assignment.evento;
+        if (!otherEvent) continue;
+        if (otherEvent.estadoEvento === EstadoEventoZoom.CANCELADO) continue;
+
+        const hasConflict =
+          nextStart.getTime() < otherEvent.finProgramadoAt.getTime() + ASSIGNMENT_CONFLICT_BUFFER_MS &&
+          nextEnd.getTime() > otherEvent.inicioProgramadoAt.getTime() - ASSIGNMENT_CONFLICT_BUFFER_MS;
+        if (!hasConflict) continue;
+
+        const assistantLabel = getUserDisplayName(assignment.asistente.usuario);
+        throw new Error(
+          `No se puede reprogramar la reunion porque genera conflicto de horario para ${assistantLabel}.`
+        );
+      }
+    }
+
+    const durationMinutes = Math.max(
+      1,
+      Math.floor((nextEnd.getTime() - nextStart.getTime()) / 60000)
+    );
+
+    let resolvedJoinUrl = event.zoomJoinUrl;
+    let resolvedPayload: Prisma.InputJsonValue | undefined =
+      (event.zoomPayloadUltimo as Prisma.InputJsonValue | null) ?? undefined;
+    let synchronizedAt = event.sincronizadoConZoomAt ?? null;
+
+    const dedicatedMeetingId = normalizeZoomMeetingId(event.zoomMeetingId);
+    const primaryMeetingId = normalizeZoomMeetingId(event.solicitud.meetingPrincipalId);
+    const shouldSyncZoom = titleChanged || descriptionChanged || scheduleChanged;
+
+    if (shouldSyncZoom) {
+      const targetMeetingId = dedicatedMeetingId ?? primaryMeetingId;
+      if (targetMeetingId) {
+        const zoomClient = await ZoomMeetingsClient.fromAccountCredentials();
+
+        try {
+          if (dedicatedMeetingId && dedicatedMeetingId !== primaryMeetingId) {
+            const payload: Record<string, unknown> = {};
+            if (titleChanged) payload.topic = normalizedTitle;
+            if (descriptionChanged) payload.agenda = normalizedDescription ?? "";
+            if (scheduleChanged) {
+              payload.start_time = formatZoomDateTimeInTimezone(nextStart, nextTimezone);
+              payload.duration = durationMinutes;
+              payload.timezone = nextTimezone;
+            }
+            if (Object.keys(payload).length > 0) {
+              await zoomClient.updateMeeting(dedicatedMeetingId, payload);
+            }
+
+            const refreshed = await fetchZoomMeetingSnapshot(zoomClient, dedicatedMeetingId);
+            if (refreshed) {
+              resolvedJoinUrl = refreshed.joinUrl ?? resolvedJoinUrl;
+              resolvedPayload = refreshed.rawPayload;
+              synchronizedAt = new Date();
+            }
+          } else if (primaryMeetingId) {
+            if (scheduleChanged) {
+              const snapshot = await fetchZoomMeetingSnapshot(zoomClient, primaryMeetingId);
+              const matchedOccurrence =
+                snapshot
+                  ? findZoomOccurrenceByStart(snapshot.instances, previousStart) ??
+                    findAnyZoomOccurrenceByStart(snapshot.instances, previousStart)
+                  : null;
+              const occurrenceId = matchedOccurrence?.occurrenceId ?? null;
+              if (!occurrenceId) {
+                throw new Error(
+                  "No se encontro occurrence_id en Zoom para actualizar el horario de esta instancia."
+                );
+              }
+
+              await zoomClient.updateMeeting(
+                primaryMeetingId,
+                {
+                  start_time: formatZoomDateTimeInTimezone(nextStart, nextTimezone),
+                  duration: durationMinutes,
+                  timezone: nextTimezone
+                },
+                { occurrence_id: occurrenceId }
+              );
+            }
+
+            if (titleChanged || descriptionChanged) {
+              const payload: Record<string, unknown> = {};
+              if (titleChanged) payload.topic = normalizedTitle;
+              if (descriptionChanged) payload.agenda = normalizedDescription ?? "";
+              if (Object.keys(payload).length > 0) {
+                await zoomClient.updateMeeting(primaryMeetingId, payload);
+              }
+            }
+
+            const refreshed = await fetchZoomMeetingSnapshot(zoomClient, primaryMeetingId);
+            if (refreshed) {
+              const matchedUpdatedOccurrence =
+                findZoomOccurrenceByStart(refreshed.instances, nextStart) ??
+                findAnyZoomOccurrenceByStart(refreshed.instances, nextStart);
+              resolvedJoinUrl =
+                matchedUpdatedOccurrence?.joinUrl ??
+                refreshed.joinUrl ??
+                resolvedJoinUrl;
+              resolvedPayload = refreshed.rawPayload;
+              synchronizedAt = new Date();
+            }
+          }
+        } catch (error) {
+          if (error instanceof ZoomApiError) {
+            throw new Error(`No se pudo actualizar la reunion en Zoom: ${error.message}`);
+          }
+          throw error;
+        }
+      }
+    }
+
+    const activeRate = await getActiveRate(event.modalidadReunion);
+    const estimatedCost =
+      activeRate != null
+        ? calculateEstimatedCost(durationMinutes, Number(activeRate.valorHora))
+        : event.costoEstimado ?? null;
+
+    await db.$transaction(async (tx) => {
+      await tx.eventoZoom.update({
+        where: { id: eventoId },
+        data: {
+          inicioProgramadoAt: nextStart,
+          finProgramadoAt: nextEnd,
+          timezone: nextTimezone,
+          zoomJoinUrl: resolvedJoinUrl,
+          zoomPayloadUltimo: resolvedPayload,
+          sincronizadoConZoomAt: synchronizedAt ?? undefined,
+          agendaCierraAt:
+            event.requiereAsistencia &&
+            event.estadoCobertura !== EstadoCoberturaSoporte.NO_REQUIERE &&
+            event.estadoCobertura !== EstadoCoberturaSoporte.CANCELADO
+              ? new Date(nextStart.getTime() - 24 * 60 * 60_000)
+              : event.agendaCierraAt,
+          costoEstimado: estimatedCost ?? undefined
+        }
+      });
+
+      const activeEvents = await tx.eventoZoom.findMany({
+        where: {
+          solicitudSalaId: event.solicitud.id,
+          estadoEvento: { not: EstadoEventoZoom.CANCELADO }
+        },
+        select: {
+          inicioProgramadoAt: true,
+          finProgramadoAt: true
+        },
+        orderBy: {
+          inicioProgramadoAt: "asc"
+        }
+      });
+
+      const firstEvent = activeEvents[0] ?? {
+        inicioProgramadoAt: nextStart,
+        finProgramadoAt: nextEnd
+      };
+      const lastEvent = activeEvents[activeEvents.length - 1] ?? firstEvent;
+      const recurringStarts = activeEvents.map((item) => item.inicioProgramadoAt.toISOString());
+
+      await tx.solicitudSala.update({
+        where: { id: event.solicitud.id },
+        data: {
+          titulo: normalizedTitle,
+          programaNombre: normalizedProgram || null,
+          responsableNombre: normalizedResponsible || null,
+          descripcion: normalizedDescription,
+          timezone: nextTimezone,
+          fechaInicioSolicitada: firstEvent.inicioProgramadoAt,
+          fechaFinSolicitada: firstEvent.finProgramadoAt,
+          fechaFinRecurrencia:
+            activeEvents.length > 1 ? lastEvent.inicioProgramadoAt : null,
+          fechasInstancias:
+            recurringStarts.length > 0
+              ? recurringStarts
+              : [nextStart.toISOString()]
+        }
+      });
+
+      if (activeRate) {
+        await tx.asignacionAsistente.updateMany({
+          where: {
+            eventoZoomId: eventoId,
+            estadoAsignacion: { in: [EstadoAsignacion.ASIGNADO, EstadoAsignacion.ACEPTADO] }
+          },
+          data: {
+            montoEstimado: estimatedCost ?? undefined
+          }
+        });
+      }
+
+      await tx.auditoria.create({
+        data: {
+          actorUsuarioId: user.id,
+          accion: "SOLICITUD_REUNION_EDITADA",
+          entidadTipo: "EventoZoom",
+          entidadId: eventoId,
+          valorAnterior: {
+            titulo: previousTitle,
+            programaNombre: previousProgram || null,
+            responsableNombre: previousResponsible || null,
+            descripcion: previousDescription || null,
+            inicioProgramadoAt: previousStart.toISOString(),
+            finProgramadoAt: previousEnd.toISOString(),
+            timezone: previousTimezone
+          },
+          valorNuevo: {
+            titulo: normalizedTitle,
+            programaNombre: normalizedProgram || null,
+            responsableNombre: normalizedResponsible || null,
+            descripcion: normalizedDescription,
+            inicioProgramadoAt: nextStart.toISOString(),
+            finProgramadoAt: nextEnd.toISOString(),
+            timezone: nextTimezone
+          }
+        }
+      });
+    });
+
+    await notifyAdminInAppMovement({
+      action: "SOLICITUD_REUNION_EDITADA",
+      actorEmail: user.email,
+      actorFirstName: user.firstName,
+      actorLastName: user.lastName,
+      actorRole: user.role,
+      entityType: "EventoZoom",
+      entityId: eventoId,
+      summary: normalizedTitle,
+      details: {
+        solicitudId: event.solicitud.id,
+        titleChanged,
+        programChanged,
+        responsibleChanged,
+        descriptionChanged,
+        scheduleChanged
+      }
+    });
+
+    if (event.asignaciones.length > 0) {
+      const previousDurationMinutes = Math.max(
+        1,
+        Math.floor((previousEnd.getTime() - previousStart.getTime()) / 60000)
+      );
+      const changeLines: string[] = [];
+      if (titleChanged) {
+        changeLines.push(`Titulo: "${previousTitle}" -> "${normalizedTitle}"`);
+      }
+      if (programChanged) {
+        changeLines.push(
+          `Programa: "${previousProgram || "-"}" -> "${normalizedProgram || "-"}"`
+        );
+      }
+      if (responsibleChanged) {
+        changeLines.push(
+          `Responsable: "${previousResponsible || "-"}" -> "${normalizedResponsible || "-"}"`
+        );
+      }
+      if (descriptionChanged) {
+        changeLines.push("Descripcion/agenda actualizada.");
+      }
+      if (scheduleChanged) {
+        changeLines.push(
+          `Inicio: ${formatEventDateForNotification(previousStart, previousTimezone)} -> ${formatEventDateForNotification(nextStart, nextTimezone)}`
+        );
+        changeLines.push(
+          `Fin: ${formatEventDateForNotification(previousEnd, previousTimezone)} -> ${formatEventDateForNotification(nextEnd, nextTimezone)}`
+        );
+        if (previousDurationMinutes !== durationMinutes) {
+          changeLines.push(`Duracion: ${previousDurationMinutes} min -> ${durationMinutes} min`);
+        }
+      }
+
+      await createAssistantInternalNotifications({
+        userIds: event.asignaciones.map((assignment) => assignment.asistente.usuario.id),
+        asunto: `Reunion actualizada: ${normalizedTitle}`,
+        cuerpoLineas: [
+          "La reunion que tienes asignada fue actualizada.",
+          `Solicitud ID: ${event.solicitud.id}`,
+          `Evento ID: ${event.id}`,
+          ...changeLines,
+          `Actualizado por: ${getUserDisplayName(user)}`
+        ],
+        entidadReferenciaTipo: NOTIF_ACTIVITY_ZOOM_ASSISTANT_MEETING_UPDATED,
+        entidadReferenciaId: event.id,
+        push: {
+          title: "Reunion actualizada",
+          body: `"${normalizedTitle}" tuvo cambios en su configuracion.`,
+          url: "/?tab=notificaciones",
+          tag: "zoom-meeting-updated"
+        }
+      }).catch((error) => {
+        logger.warn("No se pudo registrar notificacion interna por cambios de reunion.", {
+          eventoId,
+          solicitudId: event.solicitud.id,
+          error: error instanceof Error ? error.message : String(error)
+        });
+      });
+    }
+
+    return {
+      updated: true,
+      eventoId,
+      solicitudId: event.solicitud.id,
+      zoomMeetingId: dedicatedMeetingId ?? primaryMeetingId ?? null,
+      changes: {
+        titleChanged,
+        programChanged,
+        responsibleChanged,
+        descriptionChanged,
+        scheduleChanged
+      }
     };
   }
 
@@ -8914,6 +9872,22 @@ export class SalasService {
     });
 
     if (requiereAsistencia) {
+      await sendMonitoringRequiredInAppToAssistantPool({
+        solicitudId: result.solicitudId,
+        titulo,
+        modalidad: input.modalidadReunion,
+        programaNombre: programaNombre || null,
+        responsableNombre: responsableNombre || null,
+        timezone,
+        instanceStarts: instancePlans.map((plan) => plan.inicio),
+        estadoSolicitud: EstadoSolicitudSala.PROVISIONADA
+      }).catch((error) => {
+        logger.warn("No se pudo enviar notificacion interna al pool de asistentes Zoom (registro manual proxima).", {
+          solicitudId: result.solicitudId,
+          error: error instanceof Error ? error.message : String(error)
+        });
+      });
+
       await sendMonitoringRequiredEmailToAssistantPool({
         solicitudId: result.solicitudId,
         titulo,
