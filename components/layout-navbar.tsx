@@ -253,8 +253,8 @@ export function LayoutNavbar({ user }: LayoutNavbarProps) {
       return `Reuniones de ${currentMonthLabel}`;
     }
     if (tabId === "solicitudes") {
-      if (effectiveRole === "DOCENTE") return "Mis Solicitudes";
-      if (isAdminRole) return "Todas las solicitudes";
+      if (effectiveRole === "DOCENTE") return "Mis pedidos";
+      if (isAdminRole) return "Todos los pedidos";
     }
     return config.label;
   }

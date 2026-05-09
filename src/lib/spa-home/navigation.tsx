@@ -66,7 +66,7 @@ export const NAVIGATION_GROUP_ORDER: NavigationGroup[] = ["GENERAL", "OPERACION"
 
 export const NAVIGATION_GROUP_LABEL: Record<NavigationGroup, string> = {
   GENERAL: "Inicio",
-  OPERACION: "Solicitudes",
+  OPERACION: "Reuniones",
   ASISTENTES: "Asistentes",
   ZOOM: "Zoom",
   ADMIN: "Administracion"
@@ -92,7 +92,7 @@ export const TAB_CONFIG: Record<Tab, TabConfig> = {
     group: "OPERACION"
   },
   solicitudes: {
-    label: "Solicitudes",
+    label: "Pedidos",
     visibleInNavigation: true,
     roles: ["ADMINISTRADOR", "DOCENTE"],
     group: "OPERACION"

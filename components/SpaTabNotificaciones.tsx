@@ -1060,7 +1060,7 @@ export function SpaTabNotificaciones({ isAdmin }: SpaTabNotificacionesProps) {
                                       "&:hover": { backgroundColor: "transparent", textDecoration: "underline" }
                                     }}
                                   >
-                                    Ver Solicitud
+                                    Ver pedido
                                   </Button>
                                 )}
                               </Stack>

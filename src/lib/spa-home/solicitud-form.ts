@@ -37,6 +37,7 @@ export type SolicitudFormState = {
   fechasEspecificas: string;
   fechasEspecificasDetalle: string;
   correosDocentes: string;
+  salaEsperaAutorizados: string;
   observaciones: string;
 };
 
@@ -71,5 +72,6 @@ export const DEFAULT_SOLICITUD_FORM: SolicitudFormState = {
   fechasEspecificas: "",
   fechasEspecificasDetalle: "",
   correosDocentes: "",
+  salaEsperaAutorizados: "",
   observaciones: ""
 };

@@ -7,6 +7,7 @@ import {
 import type { ZoomMonthlyMode, ZoomRecurrenceType } from "@/src/lib/spa-home/recurrence";
 import type { SolicitudFormState } from "@/src/lib/spa-home/solicitud-form";
 import type { SubmitDocenteSolicitudPayload } from "@/src/services/solicitudesApi";
+import { parseWaitingRoomAllowlistText } from "@/src/lib/waiting-room-allowlist";
 import { combineDateAndTimeToIso, resolveEndByTimeOrDuration } from "@/components/spa-tabs/form-validators";
 
 const DEFAULT_TIMEZONE = "America/Montevideo";
@@ -51,6 +52,7 @@ type SharedPayloadFields = Pick<
   | "requiereGrabacion"
   | "requiereAsistencia"
   | "motivoAsistencia"
+  | "salaEsperaPermitidos"
 >;
 
 function buildDescripcion(base: string, metadata: string): string {
@@ -72,6 +74,10 @@ function buildSharedPayloadFields(
   const { form, metadata, normalizedDocentesCorreos } = input;
   const requiereAsistencia = form.asistenciaZoom === "SI";
   const requiereGrabacion = form.grabacion === "SI";
+  const parsedWaitingRoomAllowlist = parseWaitingRoomAllowlistText(form.salaEsperaAutorizados);
+  if (parsedWaitingRoomAllowlist.errors.length > 0) {
+    throw new Error(parsedWaitingRoomAllowlist.errors[0] ?? "La lista de sala de espera tiene errores.");
+  }
 
   return {
     titulo: form.tema.trim(),
@@ -85,7 +91,8 @@ function buildSharedPayloadFields(
     grabacionPreferencia: buildGrabacionPreferencia(form.grabacion),
     requiereGrabacion,
     requiereAsistencia,
-    motivoAsistencia: requiereAsistencia ? "Asistencia solicitada desde formulario docente." : undefined
+    motivoAsistencia: requiereAsistencia ? "Asistencia solicitada desde formulario docente." : undefined,
+    salaEsperaPermitidos: requiereAsistencia ? parsedWaitingRoomAllowlist.entries : undefined
   };
 }
 

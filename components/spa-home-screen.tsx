@@ -47,7 +47,8 @@ import {
   sendSolicitudReminder as sendSolicitudReminderApi,
   updatePastMeeting as updatePastMeetingApi,
   enableSolicitudAsistencia as enableSolicitudAsistenciaApi,
-  updateSolicitudInstanciaAsistencia as updateSolicitudInstanciaAsistenciaApi
+  updateSolicitudInstanciaAsistencia as updateSolicitudInstanciaAsistenciaApi,
+  reassignRecurringSolicitudResponsable as reassignRecurringSolicitudResponsableApi
 } from "@/src/services/solicitudesApi";
 import {
   createPrograma as createProgramaApi,
@@ -58,7 +59,8 @@ import {
   loadAgendaLibre,
   setInterest as setInterestApi,
   assignAssistantToEvent as assignAssistantToEventApi,
-  unassignAssistantFromEvent as unassignAssistantFromEventApi
+  unassignAssistantFromEvent as unassignAssistantFromEventApi,
+  updateUpcomingZoomEvent as updateUpcomingZoomEventApi
 } from "@/src/services/agendaApi";
 import {
   loadUsers,
@@ -472,15 +474,40 @@ export function SpaHomeScreen() {
     );
     return selectedOption?.monthsBack ?? DEFAULT_ZOOM_PAST_MONTHS_BACK;
   }, [selectedZoomPastMonthKey, zoomPastMonthOptions]);
-  const docenteLinkedEmailOptions = useMemo(
-    () => resolveUserAccessEmails(user),
-    [user]
+  const requesterAccessEmails = useMemo(() => resolveUserAccessEmails(user), [user]);
+  const requesterResponsibleEmail = useMemo(
+    () => requesterAccessEmails[0] ?? user?.email?.trim().toLowerCase() ?? "",
+    [requesterAccessEmails, user?.email]
   );
-  const requesterDisplayName = useMemo(() => {
-    if (!user) return "";
-    const fullName = [user.firstName, user.lastName].filter(Boolean).join(" ").trim();
-    return fullName || user.email || "";
-  }, [user]);
+  const docenteLinkedEmailOptions = useMemo(() => {
+    if (effectiveRole !== "ADMINISTRADOR") {
+      return requesterAccessEmails;
+    }
+
+    const selectedResponsibleEmail = form.responsable.trim().toLowerCase();
+    if (!selectedResponsibleEmail) return [];
+
+    const matchingDocente = users.find((managedUser) => {
+      if (managedUser.role !== "DOCENTE") return false;
+      const candidateEmails = new Set(
+        [managedUser.email, ...(managedUser.emails ?? [])]
+          .map((email) => email.trim().toLowerCase())
+          .filter(Boolean)
+      );
+      return candidateEmails.has(selectedResponsibleEmail);
+    });
+    if (!matchingDocente) {
+      return [selectedResponsibleEmail];
+    }
+
+    return Array.from(
+      new Set(
+        [matchingDocente.email, ...(matchingDocente.emails ?? [])]
+          .map((email) => email.trim().toLowerCase())
+          .filter(Boolean)
+      )
+    );
+  }, [effectiveRole, form.responsable, requesterAccessEmails, users]);
   const responsableOptions = useMemo(() => {
     const map = new Map<string, { value: string; label: string }>();
 
@@ -488,11 +515,10 @@ export function SpaHomeScreen() {
       const fullName = [firstName, lastName].filter(Boolean).join(" ").trim();
       const normalizedEmail = email.trim().toLowerCase();
       if (!normalizedEmail) return;
-      const value = fullName ? `${fullName} (${normalizedEmail})` : normalizedEmail;
-      const key = `${fullName.toLowerCase()}|${normalizedEmail}`;
+      const key = normalizedEmail;
       if (map.has(key)) return;
       const label = fullName ? `${fullName} (${normalizedEmail})` : normalizedEmail;
-      map.set(key, { value, label });
+      map.set(key, { value: normalizedEmail, label });
     };
 
     const addOptionsForPerson = (
@@ -517,7 +543,7 @@ export function SpaHomeScreen() {
     };
 
     for (const managedUser of users) {
-      if (!["DOCENTE", "ADMINISTRADOR"].includes(managedUser.role)) continue;
+      if (managedUser.role !== "DOCENTE") continue;
       addOptionsForPerson(
         managedUser.firstName,
         managedUser.lastName,
@@ -526,10 +552,12 @@ export function SpaHomeScreen() {
       );
     }
 
-    addOptionsForPerson(user?.firstName, user?.lastName, user?.email, user?.emails);
+    if (effectiveRole === "DOCENTE") {
+      addOptionsForPerson(user?.firstName, user?.lastName, user?.email, user?.emails);
+    }
 
     return Array.from(map.values()).sort((a, b) => a.label.localeCompare(b.label, "es"));
-  }, [users, user]);
+  }, [effectiveRole, users, user]);
   const docenteOptions = useMemo<DocenteOption[]>(() => {
     const map = new Map<string, DocenteOption>();
 
@@ -556,7 +584,7 @@ export function SpaHomeScreen() {
     };
 
     for (const managedUser of users) {
-      if (!["DOCENTE", "ADMINISTRADOR"].includes(managedUser.role)) continue;
+      if (managedUser.role !== "DOCENTE") continue;
       const candidateEmails = new Set<string>([
         managedUser.email,
         ...(managedUser.emails ?? [])
@@ -571,13 +599,15 @@ export function SpaHomeScreen() {
       }
     }
 
-    const currentUserEmails = new Set<string>([user?.email ?? "", ...(user?.emails ?? [])]);
-    for (const candidateEmail of currentUserEmails) {
-      addDocente(candidateEmail, user?.firstName, user?.lastName, null);
+    if (effectiveRole === "DOCENTE") {
+      const currentUserEmails = new Set<string>([user?.email ?? "", ...(user?.emails ?? [])]);
+      for (const candidateEmail of currentUserEmails) {
+        addDocente(candidateEmail, user?.firstName, user?.lastName, null);
+      }
     }
 
     return Array.from(map.values()).sort((a, b) => a.label.localeCompare(b.label, "es"));
-  }, [users, user]);
+  }, [effectiveRole, users, user]);
   const monitorOptions = useMemo<MonitorOption[]>(() => {
     const map = new Map<string, MonitorOption>();
 
@@ -860,17 +890,33 @@ export function SpaHomeScreen() {
   }, [effectiveRole, tab, setTab]);
 
   useEffect(() => {
-    if (!requesterDisplayName) return;
+    if (!requesterResponsibleEmail) return;
+    if (effectiveRole !== "DOCENTE") return;
     setForm((prev) => {
       if (prev.responsable.trim()) {
         return prev;
       }
       return {
         ...prev,
-        responsable: requesterDisplayName
+        responsable: requesterResponsibleEmail
       };
     });
-  }, [requesterDisplayName, setForm]);
+  }, [effectiveRole, requesterResponsibleEmail, setForm]);
+
+  useEffect(() => {
+    if (effectiveRole !== "ADMINISTRADOR") return;
+    if (responsableOptions.length === 0) return;
+    setForm((prev) => {
+      const current = prev.responsable.trim().toLowerCase();
+      if (current && responsableOptions.some((option) => option.value === current)) {
+        return prev;
+      }
+      return {
+        ...prev,
+        responsable: responsableOptions[0]?.value ?? ""
+      };
+    });
+  }, [effectiveRole, responsableOptions, setForm]);
 
   useEffect(() => {
     if (docenteLinkedEmailOptions.length === 0) return;
@@ -1080,8 +1126,21 @@ export function SpaHomeScreen() {
 
     setIsSubmittingSolicitud(true);
     try {
+      const normalizedResponsable = form.responsable.trim().toLowerCase();
+      if (!normalizedResponsable) {
+        setMessage("Debes seleccionar la persona a cargo.");
+        return;
+      }
+      if (canDelegateSolicitudResponsable) {
+        const isValidResponsable = responsableOptions.some((option) => option.value === normalizedResponsable);
+        if (!isValidResponsable) {
+          setMessage("Debes seleccionar un docente válido como persona a cargo.");
+          return;
+        }
+      }
+
       const metadata = [
-        `Responsable: ${form.responsable || "No especificado"}`,
+        `Responsable: ${normalizedResponsable || "No especificado"}`,
         form.grabacion === "DEFINIR" ? "Grabación: A definir en clase" : undefined
       ]
         .filter(Boolean)
@@ -1093,7 +1152,7 @@ export function SpaHomeScreen() {
         return;
       }
       if (!docenteLinkedEmailOptions.includes(linkedDocenteEmail)) {
-        setMessage("El correo vinculado debe pertenecer a tu cuenta.");
+        setMessage("El correo vinculado debe pertenecer al docente a cargo.");
         return;
       }
 
@@ -1107,7 +1166,10 @@ export function SpaHomeScreen() {
         ])
       ).join("\n");
       const payload = buildDocenteSolicitudPayload({
-        form,
+        form: {
+          ...form,
+          responsable: normalizedResponsable
+        },
         metadata,
         normalizedDocentesCorreos,
         timezone: "America/Montevideo"
@@ -1355,6 +1417,129 @@ export function SpaHomeScreen() {
       return false;
     } finally {
       setSendingReminderSolicitudId(null);
+    }
+  }
+
+  async function editUpcomingSolicitudMeeting(input: {
+    solicitudId: string;
+    eventoId: string;
+    titulo: string;
+    programaNombre: string;
+    responsableNombre?: string;
+    docenteCreadorNombre?: string;
+    isRecurring?: boolean;
+  }): Promise<boolean> {
+    setMessage("");
+
+    try {
+      const normalizedTitle = input.titulo.trim();
+      const normalizedProgram = input.programaNombre.trim();
+      const normalizedResponsible = input.responsableNombre?.trim() ?? "";
+      const normalizedCreator = input.docenteCreadorNombre?.trim().toLowerCase() ?? "";
+
+      if (!normalizedTitle) {
+        setMessage("Debes completar el tema de la reunión.");
+        return false;
+      }
+      if (!normalizedProgram) {
+        setMessage("Debes completar el programa.");
+        return false;
+      }
+      const updateMeetingResponse = await updateUpcomingZoomEventApi(input.eventoId, {
+        titulo: normalizedTitle,
+        programaNombre: normalizedProgram,
+        responsableNombre: normalizedResponsible || undefined
+      });
+
+      if (!updateMeetingResponse.success) {
+        setMessage(updateMeetingResponse.error ?? "No se pudo actualizar la reunión.");
+        return false;
+      }
+      const meetingUpdated = Boolean(updateMeetingResponse.result?.updated);
+
+      let creatorUpdated = false;
+      const canUpdateCreatorFromEdit =
+        canDelegateSolicitudResponsable && input.isRecurring && normalizedCreator;
+
+      if (canUpdateCreatorFromEdit) {
+        if (!normalizedResponsible) {
+          setMessage("Debes seleccionar la persona a cargo para actualizar el docente creador.");
+          return false;
+        }
+        const reassignResponse = await reassignRecurringSolicitudResponsableApi({
+          solicitudId: input.solicitudId,
+          responsableNombre: normalizedResponsible,
+          docenteCreadorNombre: normalizedCreator
+        });
+        if (!reassignResponse.success) {
+          setMessage(reassignResponse.error ?? "No se pudo actualizar el docente creador.");
+          return false;
+        }
+        creatorUpdated = Boolean(reassignResponse.updated);
+      }
+
+      if (!meetingUpdated && !creatorUpdated) {
+        setMessage("No se detectaron cambios para guardar.");
+        return true;
+      }
+
+      if (meetingUpdated && creatorUpdated) {
+        setMessage("Recurrencia actualizada correctamente (incluye docente creador).");
+      } else if (creatorUpdated) {
+        setMessage("Docente creador actualizado correctamente.");
+      } else {
+        setMessage("Reunión actualizada correctamente.");
+      }
+
+      await refreshAfterSolicitudMutation();
+      return true;
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "No se pudo actualizar la reunión.");
+      return false;
+    }
+  }
+
+  async function reassignRecurringSolicitudResponsable(input: {
+    solicitudId: string;
+    titulo: string;
+    responsableNombre: string;
+    docenteCreadorNombre: string;
+  }): Promise<boolean> {
+    setMessage("");
+
+    try {
+      const nextResponsible = input.responsableNombre.trim().toLowerCase();
+      if (!nextResponsible) {
+        setMessage("Debes seleccionar el nuevo docente a cargo.");
+        return false;
+      }
+      const nextCreator = input.docenteCreadorNombre.trim().toLowerCase();
+      if (!nextCreator) {
+        setMessage("Debes seleccionar el nuevo docente creador.");
+        return false;
+      }
+
+      const response = await reassignRecurringSolicitudResponsableApi({
+        solicitudId: input.solicitudId,
+        responsableNombre: nextResponsible,
+        docenteCreadorNombre: nextCreator
+      });
+      if (!response.success) {
+        setMessage(response.error ?? "No se pudo actualizar el pedido recurrente.");
+        return false;
+      }
+
+      if (response.updated === false) {
+        setMessage("El pedido ya tenía ese docente a cargo y creador.");
+        return true;
+      }
+
+      setMessage(`Pedido recurrente "${input.titulo}" actualizado correctamente.`);
+      await refreshAfterSolicitudMutation();
+      return true;
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "No se pudo actualizar el pedido recurrente.");
+      return false;
     }
   }
 
@@ -2292,6 +2477,10 @@ export function SpaHomeScreen() {
           canSendReminder={canSendSolicitudReminder}
           sendingReminderSolicitudId={sendingReminderSolicitudId}
           onSendReminder={sendSolicitudReminder}
+          canEditMeeting={canEditSolicitudAssistance}
+          onEditMeeting={editUpcomingSolicitudMeeting}
+          canReassignRecurringSolicitud={canDelegateSolicitudResponsable}
+          onReassignRecurringSolicitud={reassignRecurringSolicitudResponsable}
           canEditAssistance={canEditSolicitudAssistance}
           updatingAssistanceSolicitudId={updatingAsistenciaSolicitudId}
           updatingAssistanceInstanceKey={updatingAsistenciaInstanciaKey}
@@ -2334,6 +2523,10 @@ export function SpaHomeScreen() {
           canSendReminder={canSendSolicitudReminder}
           sendingReminderSolicitudId={sendingReminderSolicitudId}
           onSendReminder={sendSolicitudReminder}
+          canEditMeeting={canEditSolicitudAssistance}
+          onEditMeeting={editUpcomingSolicitudMeeting}
+          canReassignRecurringSolicitud={canDelegateSolicitudResponsable}
+          onReassignRecurringSolicitud={reassignRecurringSolicitudResponsable}
           canEditAssistance={canEditSolicitudAssistance}
           updatingAssistanceSolicitudId={updatingAsistenciaSolicitudId}
           updatingAssistanceInstanceKey={updatingAsistenciaInstanciaKey}
@@ -2517,7 +2710,7 @@ export function SpaHomeScreen() {
           isRegisteringUpcomingMeeting={isRegisteringUpcomingMeeting}
           programaOptions={programaOptions}
           responsableOptions={responsableOptions}
-          defaultResponsableNombre={requesterDisplayName}
+          defaultResponsableNombre=""
         />
       )}
 

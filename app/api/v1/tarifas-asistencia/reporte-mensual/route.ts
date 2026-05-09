@@ -26,7 +26,44 @@ export async function GET(request: Request) {
   try {
     const url = new URL(request.url);
     const monthKey = (url.searchParams.get("month") ?? "").trim() || undefined;
+    const previewMode = (url.searchParams.get("preview") ?? "").trim().toLowerCase();
     const service = new SalasService();
+
+    if (previewMode === "all") {
+      const personHours = await service.listPersonMeetingHours({});
+      const monthKeys = (personHours.availableMonthKeys ?? []).sort((a, b) => b.localeCompare(a));
+      const reports = await Promise.all(
+        monthKeys.map(async (key) => {
+          try {
+            const report = await service.buildMonthlyAccountingWorkbook({ monthKey: key });
+            return {
+              ok: true,
+              ...report.preview
+            };
+          } catch (error) {
+            return {
+              ok: false,
+              monthKey: key,
+              error: (error as Error).message || "No se pudo generar la previsualizacion."
+            };
+          }
+        })
+      );
+
+      return NextResponse.json({
+        ok: true,
+        reports
+      });
+    }
+
+    if (previewMode === "1" || previewMode === "true" || previewMode === "preview") {
+      const report = await service.buildMonthlyAccountingWorkbook({ monthKey });
+      return NextResponse.json({
+        ok: true,
+        report: report.preview
+      });
+    }
+
     const report = await service.buildMonthlyAccountingWorkbook({ monthKey });
 
     return new NextResponse(new Uint8Array(report.content), {

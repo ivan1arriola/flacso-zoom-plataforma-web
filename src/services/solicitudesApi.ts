@@ -14,6 +14,10 @@ export type Solicitud = {
   } | null;
   requiereAsistencia?: boolean;
   requiresAsistencia?: boolean;
+  salaEsperaPermitidos?: Array<{
+    nombre?: string;
+    correo?: string;
+  }>;
   meetingPrincipalId?: string | null;
   zoomJoinUrl?: string | null;
   zoomHostAccount?: string | null;
@@ -96,6 +100,10 @@ export type SubmitDocenteSolicitudPayload = {
   requiereGrabacion: boolean;
   requiereAsistencia: boolean;
   motivoAsistencia?: string;
+  salaEsperaPermitidos?: Array<{
+    nombre?: string;
+    correo?: string;
+  }>;
   regimenEncuentros?: string;
   fechasInstancias?: string[];
   instanciasDetalle?: Array<{ inicioProgramadoAt: string; finProgramadoAt?: string }>;
@@ -543,6 +551,56 @@ export async function updateSolicitudInstanciaAsistencia(input: {
     cancelledAssignments: result.data.result?.cancelledAssignments,
     notifiedAssistants: result.data.result?.notifiedAssistants,
     alreadyDisabled: result.data.result?.alreadyDisabled
+  };
+}
+
+export async function reassignRecurringSolicitudResponsable(input: {
+  solicitudId: string;
+  responsableNombre: string;
+  docenteCreadorNombre?: string;
+}): Promise<{
+  success: boolean;
+  updated?: boolean;
+  solicitudId?: string;
+  docenteId?: string;
+  responsableNombre?: string | null;
+  createdByUserId?: string;
+  error?: string;
+}> {
+  const result = await requestJson<{
+    error?: string;
+    result?: {
+      updated?: boolean;
+      solicitudId?: string;
+      docenteId?: string;
+      responsableNombre?: string | null;
+      createdByUserId?: string;
+    };
+  }>(
+    `/api/v1/solicitudes-sala/${encodeURIComponent(input.solicitudId)}/responsable`,
+    {
+      method: "PATCH",
+      ...withJsonBody({
+        responsableNombre: input.responsableNombre,
+        docenteCreadorNombre: input.docenteCreadorNombre
+      })
+    }
+  );
+
+  if (!result.ok) {
+    return {
+      success: false,
+      error: result.data.error ?? "No se pudo mover la solicitud recurrente."
+    };
+  }
+
+  return {
+    success: true,
+    updated: result.data.result?.updated,
+    solicitudId: result.data.result?.solicitudId,
+    docenteId: result.data.result?.docenteId,
+    responsableNombre: result.data.result?.responsableNombre ?? null,
+    createdByUserId: result.data.result?.createdByUserId
   };
 }
 

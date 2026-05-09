@@ -101,6 +101,23 @@ interface SpaTabSolicitudesProps {
     toEmail?: string;
     mensaje?: string;
   }) => Promise<boolean>;
+  canEditMeeting: boolean;
+  onEditMeeting: (input: {
+    solicitudId: string;
+    eventoId: string;
+    titulo: string;
+    programaNombre: string;
+    responsableNombre?: string;
+    docenteCreadorNombre?: string;
+    isRecurring?: boolean;
+  }) => Promise<boolean>;
+  canReassignRecurringSolicitud: boolean;
+  onReassignRecurringSolicitud: (input: {
+    solicitudId: string;
+    titulo: string;
+    responsableNombre: string;
+    docenteCreadorNombre: string;
+  }) => Promise<boolean>;
   canEditAssistance: boolean;
   updatingAssistanceSolicitudId: string | null;
   updatingAssistanceInstanceKey: string | null;
@@ -136,6 +153,28 @@ interface SpaTabSolicitudesProps {
 const CREATE_PROGRAMA_VALUE = "__create_programa__";
 type SolicitudesListScope = "ACTIVAS" | "FINALIZADAS";
 type SolicitudesSortMode = "PROXIMA_INSTANCIA" | "FECHA_SOLICITUD";
+type EditMeetingDialogState = {
+  id: string;
+  titulo: string;
+  eventoId: string;
+  isRecurring: boolean;
+};
+
+type EditMeetingFormState = {
+  titulo: string;
+  programaNombre: string;
+  responsableNombre: string;
+  docenteCreadorNombre: string;
+};
+
+function buildEmptyEditMeetingForm(): EditMeetingFormState {
+  return {
+    titulo: "",
+    programaNombre: "",
+    responsableNombre: "",
+    docenteCreadorNombre: ""
+  };
+}
 
 const zoomWeekdayOptionsFull: Array<{ value: string; label: string }> = [
   { value: "1", label: "Domingo" },
@@ -171,9 +210,9 @@ const ZOOM_ACCOUNT_COLOR_PALETTE = [
 ];
 
 const ADD_INSTANCE_BUSY_MESSAGES = [
-  "Guardando instancia en el sistema...",
-  "Sincronizando instancia con Zoom...",
-  "Actualizando datos de la solicitud..."
+  "Guardando fecha de reunión en el sistema...",
+  "Sincronizando fecha de reunión con Zoom...",
+  "Actualizando datos del pedido..."
 ];
 
 function hashLabel(value: string): number {
@@ -476,6 +515,10 @@ export function SpaTabSolicitudes({
   canSendReminder,
   sendingReminderSolicitudId,
   onSendReminder,
+  canEditMeeting,
+  onEditMeeting,
+  canReassignRecurringSolicitud,
+  onReassignRecurringSolicitud,
   canEditAssistance,
   updatingAssistanceSolicitudId,
   updatingAssistanceInstanceKey,
@@ -528,6 +571,16 @@ export function SpaTabSolicitudes({
   } | null>(null);
   const [reminderToEmail, setReminderToEmail] = useState("");
   const [reminderMessage, setReminderMessage] = useState("");
+  const [reassignDialogSolicitud, setReassignDialogSolicitud] = useState<{
+    id: string;
+    titulo: string;
+  } | null>(null);
+  const [reassignResponsable, setReassignResponsable] = useState("");
+  const [reassignDocenteCreador, setReassignDocenteCreador] = useState("");
+  const [isSubmittingReassign, setIsSubmittingReassign] = useState(false);
+  const [editMeetingDialogSolicitud, setEditMeetingDialogSolicitud] = useState<EditMeetingDialogState | null>(null);
+  const [editMeetingForm, setEditMeetingForm] = useState<EditMeetingFormState>(buildEmptyEditMeetingForm);
+  const [isSubmittingEditMeeting, setIsSubmittingEditMeeting] = useState(false);
   const [addInstanceDialogSolicitud, setAddInstanceDialogSolicitud] = useState<{
     id: string;
     titulo: string;
@@ -614,6 +667,48 @@ export function SpaTabSolicitudes({
     }
   }
 
+  function openReassignDialog(item: Solicitud) {
+    const currentResponsible = (item.responsableNombre ?? "").trim().toLowerCase();
+    const currentCreator = extractEmailCandidate(item.requestedBy?.email);
+    const creatorInOptions = responsableOptions.some((option) => option.value === currentCreator);
+    setReassignDialogSolicitud({ id: item.id, titulo: item.titulo });
+    setReassignResponsable(currentResponsible);
+    setReassignDocenteCreador(
+      creatorInOptions ? currentCreator : currentResponsible
+    );
+  }
+
+  function closeReassignDialog() {
+    if (isSubmittingReassign) return;
+    setReassignDialogSolicitud(null);
+    setReassignResponsable("");
+    setReassignDocenteCreador("");
+  }
+
+  async function submitReassignDialog() {
+    if (!reassignDialogSolicitud) return;
+    const nextResponsible = reassignResponsable.trim().toLowerCase();
+    const nextCreator = reassignDocenteCreador.trim().toLowerCase();
+    if (!nextResponsible || !nextCreator) return;
+
+    setIsSubmittingReassign(true);
+    try {
+      const success = await onReassignRecurringSolicitud({
+        solicitudId: reassignDialogSolicitud.id,
+        titulo: reassignDialogSolicitud.titulo,
+        responsableNombre: nextResponsible,
+        docenteCreadorNombre: nextCreator
+      });
+      if (success) {
+        setReassignDialogSolicitud(null);
+        setReassignResponsable("");
+        setReassignDocenteCreador("");
+      }
+    } finally {
+      setIsSubmittingReassign(false);
+    }
+  }
+
   function openAddInstanceDialog(
     solicitud: Pick<Solicitud, "id" | "titulo">,
     instances: NonNullable<Solicitud["zoomInstances"]>
@@ -674,6 +769,83 @@ export function SpaTabSolicitudes({
       setAddInstanceDialogSolicitud(null);
       setAddInstanceStartLocal("");
       setAddInstanceEndLocal("");
+    }
+  }
+
+  function openEditMeetingDialog(
+    solicitud: Pick<
+      Solicitud,
+      "id" | "titulo" | "programaNombre" | "responsableNombre" | "tipoInstancias" | "requestedBy"
+    >,
+    instance: NonNullable<Solicitud["zoomInstances"]>[number]
+  ) {
+    const eventId = (instance.eventId ?? "").trim();
+    if (!eventId) return;
+    const currentResponsible = (solicitud.responsableNombre ?? "").trim();
+    const currentCreator = extractEmailCandidate(solicitud.requestedBy?.email);
+    const creatorInOptions = responsableOptions.some((option) => option.value === currentCreator);
+    const isRecurring = solicitud.tipoInstancias !== "UNICA";
+
+    setEditMeetingDialogSolicitud({
+      id: solicitud.id,
+      titulo: solicitud.titulo,
+      eventoId: eventId,
+      isRecurring
+    });
+    setEditMeetingForm({
+      titulo: solicitud.titulo,
+      programaNombre: (solicitud.programaNombre ?? "").trim(),
+      responsableNombre: (solicitud.responsableNombre ?? "").trim(),
+      docenteCreadorNombre: creatorInOptions
+        ? currentCreator
+        : currentCreator || currentResponsible
+    });
+  }
+
+  function closeEditMeetingDialog() {
+    if (isSubmittingEditMeeting) return;
+    setEditMeetingDialogSolicitud(null);
+    setEditMeetingForm(buildEmptyEditMeetingForm());
+  }
+
+  async function submitEditMeetingDialog() {
+    if (!editMeetingDialogSolicitud) return;
+
+    const normalizedTitle = editMeetingForm.titulo.trim();
+    const normalizedProgram = editMeetingForm.programaNombre.trim();
+    const normalizedResponsible = editMeetingForm.responsableNombre.trim();
+    const normalizedCreator = editMeetingForm.docenteCreadorNombre.trim().toLowerCase();
+    if (!normalizedTitle || !normalizedProgram) return;
+    if (canDelegateResponsable && !normalizedResponsible) return;
+    if (
+      canReassignRecurringSolicitud &&
+      editMeetingDialogSolicitud.isRecurring &&
+      !normalizedCreator
+    ) {
+      return;
+    }
+
+    setIsSubmittingEditMeeting(true);
+    try {
+      const success = await onEditMeeting({
+        solicitudId: editMeetingDialogSolicitud.id,
+        eventoId: editMeetingDialogSolicitud.eventoId,
+        titulo: normalizedTitle,
+        programaNombre: normalizedProgram,
+        responsableNombre: normalizedResponsible || undefined,
+        docenteCreadorNombre:
+          editMeetingDialogSolicitud.isRecurring && canReassignRecurringSolicitud
+            ? normalizedCreator
+            : undefined,
+        isRecurring: editMeetingDialogSolicitud.isRecurring
+      });
+
+      if (success) {
+        setEditMeetingDialogSolicitud(null);
+        setEditMeetingForm(buildEmptyEditMeetingForm());
+      }
+    } finally {
+      setIsSubmittingEditMeeting(false);
     }
   }
 
@@ -1165,7 +1337,7 @@ export function SpaTabSolicitudes({
     if (instances.length === 0) {
       return (
         <Typography variant="body2" color="text.secondary">
-          Esta solicitud no tiene instancias disponibles.
+          Este pedido no tiene fechas de reunión disponibles.
         </Typography>
       );
     }
@@ -1301,7 +1473,7 @@ export function SpaTabSolicitudes({
                         })
                       }
                     >
-                      {cancellingInstanciaKey === instanceKey ? "Cancelando..." : "Cancelar instancia"}
+                      {cancellingInstanciaKey === instanceKey ? "Cancelando..." : "Cancelar fecha"}
                     </Button>
                   )}
                   {canRestoreThisInstance && (
@@ -1321,7 +1493,7 @@ export function SpaTabSolicitudes({
                         })
                       }
                     >
-                      {isRestoreInProgress ? "Sincronizando..." : "Descancelar instancia"}
+                      {isRestoreInProgress ? "Sincronizando..." : "Reactivar fecha"}
                     </Button>
                   )}
                 </Stack>
@@ -1387,12 +1559,20 @@ export function SpaTabSolicitudes({
     addInstanceDialogSolicitud &&
     addingInstanceSolicitudId === addInstanceDialogSolicitud.id
   );
+  const requiresRecurringCreatorInEdit =
+    Boolean(editMeetingDialogSolicitud?.isRecurring) && canReassignRecurringSolicitud;
+  const isEditMeetingFormReady =
+    Boolean(editMeetingDialogSolicitud) &&
+    Boolean(editMeetingForm.titulo.trim()) &&
+    Boolean(editMeetingForm.programaNombre.trim()) &&
+    (!canDelegateResponsable || Boolean(editMeetingForm.responsableNombre.trim())) &&
+    (!requiresRecurringCreatorInEdit || Boolean(editMeetingForm.docenteCreadorNombre.trim()));
   const [addInstanceBusyIndex, setAddInstanceBusyIndex] = useState(0);
   const addInstanceBusyLabel =
     ADD_INSTANCE_BUSY_MESSAGES[addInstanceBusyIndex] ?? ADD_INSTANCE_BUSY_MESSAGES[0];
   const isDocenteView = viewerRole === "DOCENTE";
-  const listViewTitle = isDocenteView ? "Mis Solicitudes" : "Todas las solicitudes";
-  const listViewHeading = isDocenteView ? "Listado de mis solicitudes" : "Listado de todas las solicitudes";
+  const listViewTitle = isDocenteView ? "Mis pedidos" : "Todos los pedidos";
+  const listViewHeading = isDocenteView ? "Listado de mis pedidos" : "Listado de todos los pedidos";
 
   useEffect(() => {
     setAddInstanceBusyIndex(0);
@@ -1419,15 +1599,33 @@ export function SpaTabSolicitudes({
           sx={{ mb: 2 }}
         >
           <Typography variant="h5" component="h2" sx={{ fontWeight: 700 }}>
-            {docenteSolicitudesView === "form" ? "Nueva solicitud de sala" : listViewTitle}
+            {docenteSolicitudesView === "form" ? "Nuevo pedido de reunión" : listViewTitle}
           </Typography>
 
         </Stack>
         <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
           {docenteSolicitudesView === "form" 
-            ? "Completa el formulario para solicitar una nueva sala de Zoom."
-            : "Listado de solicitudes con estado, solicitante e informacion de reunion."}
+            ? "Completa el formulario para crear un nuevo pedido de reunión en Zoom."
+            : "Listado de pedidos con estado, solicitante e información de reunión."}
         </Typography>
+
+        <Paper
+          variant="outlined"
+          sx={{
+            p: 1.5,
+            mb: 3,
+            borderRadius: 2,
+            bgcolor: (theme) => alpha(theme.palette.info.main, 0.04),
+            borderColor: (theme) => alpha(theme.palette.info.main, 0.2)
+          }}
+        >
+          <Typography variant="caption" sx={{ display: "block", fontWeight: 800, color: "info.main", mb: 0.4 }}>
+            Diccionario rápido
+          </Typography>
+          <Typography variant="body2" color="text.secondary">
+            Pedido: registro principal. Reunión: cada fecha concreta del pedido. Reuniones recurrentes: conjunto de fechas vinculadas al mismo pedido.
+          </Typography>
+        </Paper>
 
       {canCreateShortcut && docenteSolicitudesView === "form" ? (
         <Box component="form" onSubmit={onSubmit}>
@@ -1466,7 +1664,7 @@ export function SpaTabSolicitudes({
                       select
                       value={form.responsable}
                       onChange={(e) => updateForm("responsable", e.target.value)}
-                      helperText="Como admin, puedes delegar esta solicitud."
+                      helperText="Como admin, puedes delegar este pedido."
                     >
                       {responsableOptions.map((option) => (
                         <MenuItem key={option.value} value={option.value}>
@@ -1485,7 +1683,7 @@ export function SpaTabSolicitudes({
                       fullWidth
                       value={form.responsable}
                       disabled
-                      helperText="Corresponde a quien hace la peticion."
+                      helperText="Corresponde a quien crea el pedido."
                     />
                   )}
 
@@ -1749,7 +1947,7 @@ export function SpaTabSolicitudes({
 
                     <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", sm: "1fr 1fr" }, gap: 2.5 }}>
                       <TextField
-                        label="Primer día de la serie"
+                        label="Primer día de la recurrencia"
                         type="date"
                         required
                         fullWidth
@@ -2100,6 +2298,19 @@ export function SpaTabSolicitudes({
                   helperText="Ingresa un correo por línea. Recibirán una copia de la confirmación."
                 />
 
+                {form.asistenciaZoom === "SI" ? (
+                  <TextField
+                    label="Personas autorizadas para sala de espera (informativo)"
+                    multiline
+                    minRows={3}
+                    fullWidth
+                    value={form.salaEsperaAutorizados}
+                    onChange={(e) => updateForm("salaEsperaAutorizados", e.target.value)}
+                    placeholder={"Nombre Apellido | correo@dominio.com\nSolo nombre\nsolo-correo@dominio.com"}
+                    helperText='Una persona por línea. Formatos: "Nombre | correo", "Nombre", o "correo".'
+                  />
+                ) : null}
+
                 <TextField
                   label="Observaciones o comentarios adicionales"
                   multiline
@@ -2127,7 +2338,7 @@ export function SpaTabSolicitudes({
                   boxShadow: isDarkMode ? "0 8px 32px rgba(96, 165, 250, 0.2)" : "0 8px 32px rgba(31, 75, 143, 0.2)"
                 }}
               >
-                {isSubmittingSolicitud ? "Enviando solicitud..." : "Enviar solicitud"}
+                {isSubmittingSolicitud ? "Guardando pedido..." : "Crear pedido"}
               </Button>
             </Box>
           </Stack>
@@ -2211,7 +2422,7 @@ export function SpaTabSolicitudes({
                 setExpandedSolicitudId(null);
               }}
             >
-              Activas / por ocurrir ({solicitudesByLifecycle.activas.length})
+              Activos / por ocurrir ({solicitudesByLifecycle.activas.length})
             </Button>
             <Button
               type="button"
@@ -2236,7 +2447,7 @@ export function SpaTabSolicitudes({
                 variant={solicitudesSortMode === "PROXIMA_INSTANCIA" ? "contained" : "outlined"}
                 onClick={() => setSolicitudesSortMode("PROXIMA_INSTANCIA")}
               >
-                Proxima instancia
+                Próxima reunión
               </Button>
               <Button
                 type="button"
@@ -2244,7 +2455,7 @@ export function SpaTabSolicitudes({
                 variant={solicitudesSortMode === "FECHA_SOLICITUD" ? "contained" : "outlined"}
                 onClick={() => setSolicitudesSortMode("FECHA_SOLICITUD")}
               >
-                Fecha de solicitud
+                Fecha de pedido
               </Button>
             </Stack>
           </Stack>
@@ -2300,13 +2511,13 @@ export function SpaTabSolicitudes({
             </Stack>
           ) : solicitudes.length === 0 ? (
             <Typography variant="body2" color="text.secondary">
-              No hay solicitudes registradas.
+              No hay pedidos registrados.
             </Typography>
           ) : visibleSolicitudes.length === 0 ? (
             <Typography variant="body2" color="text.secondary">
               {solicitudesListScope === "ACTIVAS"
-                ? "No hay solicitudes activas o pendientes de ocurrir."
-                : "No hay solicitudes con todas sus instancias finalizadas."}
+                ? "No hay pedidos activos o pendientes de ocurrir."
+                : "No hay pedidos con todas sus fechas finalizadas."}
             </Typography>
           ) : null}
           {visibleSolicitudes.length > 0 && !isLoading && (
@@ -2420,6 +2631,7 @@ export function SpaTabSolicitudes({
                   const solicitudRequiresAssistance = Boolean(
                     item.requiereAsistencia ?? item.requiresAsistencia
                   );
+                  const waitingRoomAllowlist = item.salaEsperaPermitidos ?? [];
                   const solicitudStatus = mapSolicitudStatus(resolveSolicitudStatusCode(item));
                   const isSolicitudCancelled = isSolicitudCancelledStatus(item.estadoSolicitud);
                   const statusAccent =
@@ -2441,7 +2653,7 @@ export function SpaTabSolicitudes({
                         sortedInstances[0]
                       : sortedInstances[sortedInstances.length - 1];
                   const instanceTimeLabel =
-                    solicitudesListScope === "ACTIVAS" ? "Proxima instancia" : "Ultima instancia";
+                    solicitudesListScope === "ACTIVAS" ? "Próxima reunión" : "Última reunión";
                   const hasEligibleInstanceForAssistance = sortedInstances.some((instance) =>
                     isInstanceActiveOrUpcoming(instance, Date.now())
                   );
@@ -2515,6 +2727,19 @@ export function SpaTabSolicitudes({
                     canEditAssistance &&
                     !isSolicitudCancelled &&
                     (solicitudRequiresAssistance || hasEligibleInstanceForAssistance);
+                  const isRecurringSolicitud = item.tipoInstancias !== "UNICA";
+                  const editableInstance =
+                    sortedInstances.find((instance) => {
+                      if (!instance.eventId) return false;
+                      const endAt = new Date(resolveInstanceEndIso(instance)).getTime();
+                      return Number.isFinite(endAt) && endAt > Date.now();
+                    }) ?? null;
+                  const showEditMeetingAction = canEditMeeting && !isSolicitudCancelled;
+                  const showReassignRecurringAction =
+                    canReassignRecurringSolicitud &&
+                    isRecurringSolicitud &&
+                    !isSolicitudCancelled;
+                  const canEditSelectedMeeting = Boolean(editableInstance?.eventId);
                   const showReminderAction = canSendReminder;
                   const showAssistantAccessAction = solicitudRequiresAssistance && canSendReminder;
                   const hasPrimaryActions = Boolean(joinUrl) || showAddInstanceAction || showEditAssistanceAction;
@@ -2552,7 +2777,7 @@ export function SpaTabSolicitudes({
                               <Chip 
                                 size="small" 
                                 variant="outlined" 
-                                label={`${instanceCount} ${instanceCount === 1 ? "instancia" : "instancias"}`} 
+                                label={`${instanceCount} ${instanceCount === 1 ? "fecha" : "fechas"}`} 
                                 icon={<CalendarMonthOutlinedIcon fontSize="small" />}
                                 sx={{ borderRadius: 1.5 }}
                               />
@@ -2613,6 +2838,33 @@ export function SpaTabSolicitudes({
 
                           <Stack spacing={1} sx={{ width: { xs: "100%", md: "auto" } }}>
                             <Stack direction="row" spacing={1} justifyContent={{ xs: "flex-start", md: "flex-end" }}>
+                              {showEditMeetingAction && (
+                                <Tooltip
+                                  title={
+                                    canEditSelectedMeeting
+                                      ? isRecurringSolicitud
+                                        ? "Editar datos de toda la recurrencia (sin cambiar fechas)."
+                                        : "Editar datos de la reunión (sin cambiar fechas)."
+                                      : "No hay una fecha futura editable para esta reunión."
+                                  }
+                                >
+                                  <span>
+                                    <Button
+                                      size="small"
+                                      variant="outlined"
+                                      startIcon={<EditOutlinedIcon fontSize="small" />}
+                                      onClick={() => {
+                                        if (!editableInstance) return;
+                                        openEditMeetingDialog(item, editableInstance);
+                                      }}
+                                      disabled={!canEditSelectedMeeting || isSubmittingEditMeeting}
+                                      sx={{ borderRadius: 2, textTransform: "none", fontWeight: 600 }}
+                                    >
+                                      Editar
+                                    </Button>
+                                  </span>
+                                </Tooltip>
+                              )}
                               {showAddInstanceAction && (
                                 <Button
                                   size="small"
@@ -2623,7 +2875,7 @@ export function SpaTabSolicitudes({
                                   disabled={Boolean(addingInstanceSolicitudId)}
                                   sx={{ borderRadius: 2, textTransform: "none", fontWeight: 700 }}
                                 >
-                                  + Nueva instancia
+                                  + Nueva fecha
                                 </Button>
                               )}
                               {showReminderAction && (
@@ -2667,7 +2919,7 @@ export function SpaTabSolicitudes({
                                 endIcon={isExpanded ? <ExpandLessIcon fontSize="small" /> : <ExpandMoreIcon fontSize="small" />}
                                 sx={{ borderRadius: 2, textTransform: "none", fontWeight: 600 }}
                               >
-                                {isExpanded ? "Ocultar instancias" : "Ver instancias"}
+                                {isExpanded ? "Ocultar fechas" : "Ver fechas"}
                               </Button>
                               <Tooltip title="Ver todos los detalles">
                                 <IconButton 
@@ -2712,7 +2964,7 @@ export function SpaTabSolicitudes({
                                 {instanceTimeLabel}
                               </Typography>
                               <Typography variant="body2" sx={{ fontWeight: 700, color: "primary.main" }}>
-                                {highlightedInstance ? formatFullInstanceDateTime(highlightedInstance) : "Sin instancias"}
+                                {highlightedInstance ? formatFullInstanceDateTime(highlightedInstance) : "Sin fechas"}
                               </Typography>
                             </Box>
                             <Box>
@@ -2762,6 +3014,31 @@ export function SpaTabSolicitudes({
                               </Typography>
                               <Typography variant="body2">{responsableLabel}</Typography>
                             </Box>
+                            {solicitudRequiresAssistance ? (
+                              <Box sx={{ mb: 1.5 }}>
+                                <Typography variant="caption" color="text.secondary" sx={{ display: "block" }}>
+                                  Sala de espera (informativo)
+                                </Typography>
+                                {waitingRoomAllowlist.length > 0 ? (
+                                  <Stack spacing={0.4}>
+                                    {waitingRoomAllowlist.slice(0, 3).map((entry, idx) => (
+                                      <Typography key={`${entry.nombre ?? "-"}-${entry.correo ?? "-"}-${idx}`} variant="body2">
+                                        {(entry.nombre ?? "").trim() || "Sin nombre"}{entry.correo ? ` (${entry.correo})` : ""}
+                                      </Typography>
+                                    ))}
+                                    {waitingRoomAllowlist.length > 3 ? (
+                                      <Typography variant="caption" color="text.secondary">
+                                        +{waitingRoomAllowlist.length - 3} persona(s) más
+                                      </Typography>
+                                    ) : null}
+                                  </Stack>
+                                ) : (
+                                  <Typography variant="body2" color="text.secondary">
+                                    Sin lista cargada
+                                  </Typography>
+                                )}
+                              </Box>
+                            ) : null}
                             <Box>
                               <ZoomAccountPasswordField
                                 hostAccount={hostAccountForPassword}
@@ -2777,6 +3054,24 @@ export function SpaTabSolicitudes({
                           </Typography>
                           
                           <Stack direction="row" spacing={1}>
+                            {showReassignRecurringAction && (
+                              <Button
+                                size="small"
+                                color="info"
+                                variant="text"
+                                onClick={() => openReassignDialog(item)}
+                                disabled={isSubmittingReassign}
+                                startIcon={<GroupOutlinedIcon fontSize="small" />}
+                                sx={{
+                                  borderRadius: 1.5,
+                                  textTransform: "none",
+                                  fontWeight: 600,
+                                  "&:hover": { bgcolor: (theme) => alpha(theme.palette.info.main, 0.08) }
+                                }}
+                              >
+                                {isSubmittingReassign ? "Moviendo..." : "Mover recurrencia"}
+                              </Button>
+                            )}
                             {canDeleteSolicitud && (
                               <>
                                 <Button 
@@ -2796,7 +3091,7 @@ export function SpaTabSolicitudes({
                                   {cancellingSerieSolicitudId === item.id
                                     ? "Cancelando..."
                                     : instanceCount > 1
-                                      ? "Cancelar serie"
+                                      ? "Cancelar recurrencia"
                                       : "Cancelar reunión"}
                                 </Button>
                                 <Button 
@@ -2824,7 +3119,7 @@ export function SpaTabSolicitudes({
                       <Collapse in={isExpanded} timeout="auto" unmountOnExit>
                         <Box sx={{ p: 2, backgroundColor: "grey.50", borderTop: "1px solid", borderColor: "divider" }}>
                           <Typography variant="subtitle2" sx={{ mb: 1.2 }}>
-                            Detalle de instancias ({instances.length}) - anfitriona: {accountLabel}
+                            Detalle de fechas ({instances.length}) - anfitriona: {accountLabel}
                           </Typography>
                           {renderInstanceList(item, instances, isSolicitudCancelled)}
                         </Box>
@@ -2839,10 +3134,10 @@ export function SpaTabSolicitudes({
       )}
 
       <Dialog open={Boolean(addInstanceDialogSolicitud)} onClose={closeAddInstanceDialog} fullWidth maxWidth="sm">
-        <DialogTitle>Agregar instancia</DialogTitle>
+        <DialogTitle>Agregar fecha</DialogTitle>
         <DialogContent>
           <Typography variant="body2" color="text.secondary" sx={{ mb: 1.2 }}>
-            Reunion: {addInstanceDialogSolicitud?.titulo || "-"}
+            Reunión: {addInstanceDialogSolicitud?.titulo || "-"}
           </Typography>
           <TextField
             margin="dense"
@@ -2890,7 +3185,234 @@ export function SpaTabSolicitudes({
             disabled={!addInstanceDialogSolicitud || !isAddInstanceRangeValid || isSubmittingAddInstance}
             startIcon={<AddIcon fontSize="small" />}
           >
-            {isSubmittingAddInstance ? "Guardando..." : "Agregar instancia"}
+            {isSubmittingAddInstance ? "Guardando..." : "Agregar fecha"}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      <Dialog open={Boolean(reassignDialogSolicitud)} onClose={closeReassignDialog} fullWidth maxWidth="sm">
+        <DialogTitle>Mover pedido recurrente</DialogTitle>
+        <DialogContent>
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 1.2 }}>
+            Pedido: {reassignDialogSolicitud?.titulo || "-"}
+          </Typography>
+          <Typography variant="caption" color="text.secondary" sx={{ display: "block", mb: 1.2 }}>
+            Este cambio actualiza toda la recurrencia, incluyendo docente a cargo, docente creador y visibilidad en "Mis pedidos".
+          </Typography>
+          <TextField
+            autoFocus
+            margin="dense"
+            label="Nuevo docente a cargo"
+            select
+            fullWidth
+            required
+            value={reassignResponsable}
+            onChange={(event) => setReassignResponsable(event.target.value)}
+            disabled={isSubmittingReassign}
+            helperText="Solo se permiten usuarios con rol DOCENTE."
+          >
+            {reassignResponsable &&
+            !responsableOptions.some((option) => option.value === reassignResponsable) ? (
+              <MenuItem value={reassignResponsable}>{reassignResponsable}</MenuItem>
+            ) : null}
+            {responsableOptions.map((option) => (
+              <MenuItem key={option.value} value={option.value}>
+                {option.label}
+              </MenuItem>
+            ))}
+          </TextField>
+          <TextField
+            margin="dense"
+            label="Nuevo docente creador"
+            select
+            fullWidth
+            required
+            value={reassignDocenteCreador}
+            onChange={(event) => setReassignDocenteCreador(event.target.value)}
+            disabled={isSubmittingReassign}
+            helperText="Será quien figure como creador del pedido."
+          >
+            {reassignDocenteCreador &&
+            !responsableOptions.some((option) => option.value === reassignDocenteCreador) ? (
+              <MenuItem value={reassignDocenteCreador}>{reassignDocenteCreador}</MenuItem>
+            ) : null}
+            {responsableOptions.map((option) => (
+              <MenuItem key={`creator-${option.value}`} value={option.value}>
+                {option.label}
+              </MenuItem>
+            ))}
+          </TextField>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={closeReassignDialog} disabled={isSubmittingReassign}>
+            Cancelar
+          </Button>
+          <Button
+            variant="contained"
+            onClick={() => void submitReassignDialog()}
+            disabled={
+              !reassignDialogSolicitud ||
+              !reassignResponsable.trim() ||
+              !reassignDocenteCreador.trim() ||
+              isSubmittingReassign
+            }
+            startIcon={<GroupOutlinedIcon fontSize="small" />}
+          >
+            {isSubmittingReassign ? "Moviendo..." : "Mover recurrencia"}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      <Dialog open={Boolean(editMeetingDialogSolicitud)} onClose={closeEditMeetingDialog} fullWidth maxWidth="sm">
+        <DialogTitle>Editar reunión</DialogTitle>
+        <DialogContent>
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 1.2 }}>
+            Pedido: {editMeetingDialogSolicitud?.titulo || "-"}
+          </Typography>
+          {editMeetingDialogSolicitud?.isRecurring ? (
+            <Typography variant="caption" color="info.main" sx={{ display: "block", mb: 1.2, fontWeight: 600 }}>
+              Los cambios se aplicarán a toda la recurrencia. Las fechas se gestionan desde "Detalle de fechas".
+            </Typography>
+          ) : null}
+          <TextField
+            autoFocus
+            margin="dense"
+            label="Tema"
+            fullWidth
+            required
+            value={editMeetingForm.titulo}
+            onChange={(event) =>
+              setEditMeetingForm((prev) => ({
+                ...prev,
+                titulo: event.target.value
+              }))
+            }
+            disabled={isSubmittingEditMeeting}
+          />
+          {programaOptions.length > 0 ? (
+            <TextField
+              margin="dense"
+              label="Programa"
+              select
+              fullWidth
+              required
+              value={editMeetingForm.programaNombre}
+              onChange={(event) =>
+                setEditMeetingForm((prev) => ({
+                  ...prev,
+                  programaNombre: event.target.value
+                }))
+              }
+              disabled={isSubmittingEditMeeting}
+            >
+              {editMeetingForm.programaNombre &&
+              !programaOptions.some((option) => option === editMeetingForm.programaNombre) ? (
+                <MenuItem value={editMeetingForm.programaNombre}>
+                  {editMeetingForm.programaNombre}
+                </MenuItem>
+              ) : null}
+              {programaOptions.map((programa) => (
+                <MenuItem key={programa} value={programa}>
+                  {programa}
+                </MenuItem>
+              ))}
+            </TextField>
+          ) : (
+            <TextField
+              margin="dense"
+              label="Programa"
+              fullWidth
+              required
+              value={editMeetingForm.programaNombre}
+              onChange={(event) =>
+                setEditMeetingForm((prev) => ({
+                  ...prev,
+                  programaNombre: event.target.value
+                }))
+              }
+              disabled={isSubmittingEditMeeting}
+            />
+          )}
+          {canDelegateResponsable ? (
+            <TextField
+              margin="dense"
+              label="Persona a cargo"
+              select
+              fullWidth
+              required
+              value={editMeetingForm.responsableNombre}
+              onChange={(event) =>
+                setEditMeetingForm((prev) => ({
+                  ...prev,
+                  responsableNombre: event.target.value
+                }))
+              }
+              disabled={isSubmittingEditMeeting}
+            >
+              {editMeetingForm.responsableNombre &&
+              !responsableOptions.some((option) => option.value === editMeetingForm.responsableNombre) ? (
+                <MenuItem value={editMeetingForm.responsableNombre}>
+                  {editMeetingForm.responsableNombre}
+                </MenuItem>
+              ) : null}
+              {responsableOptions.map((option) => (
+                <MenuItem key={option.value} value={option.value}>
+                  {option.label}
+                </MenuItem>
+              ))}
+            </TextField>
+          ) : (
+            <TextField
+              margin="dense"
+              label="Persona a cargo"
+              fullWidth
+              value={editMeetingForm.responsableNombre || "-"}
+              disabled
+              helperText="Solo administración puede cambiar la persona a cargo."
+            />
+          )}
+          {canReassignRecurringSolicitud && editMeetingDialogSolicitud?.isRecurring ? (
+            <TextField
+              margin="dense"
+              label="Docente creador"
+              select
+              fullWidth
+              required
+              value={editMeetingForm.docenteCreadorNombre}
+              onChange={(event) =>
+                setEditMeetingForm((prev) => ({
+                  ...prev,
+                  docenteCreadorNombre: event.target.value
+                }))
+              }
+              disabled={isSubmittingEditMeeting}
+              helperText="Define quién figura como autor del pedido en toda la recurrencia."
+            >
+              {editMeetingForm.docenteCreadorNombre &&
+              !responsableOptions.some((option) => option.value === editMeetingForm.docenteCreadorNombre) ? (
+                <MenuItem value={editMeetingForm.docenteCreadorNombre}>
+                  {editMeetingForm.docenteCreadorNombre}
+                </MenuItem>
+              ) : null}
+              {responsableOptions.map((option) => (
+                <MenuItem key={`edit-creator-${option.value}`} value={option.value}>
+                  {option.label}
+                </MenuItem>
+              ))}
+            </TextField>
+          ) : null}
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={closeEditMeetingDialog} disabled={isSubmittingEditMeeting}>
+            Cancelar
+          </Button>
+          <Button
+            variant="contained"
+            onClick={() => void submitEditMeetingDialog()}
+            disabled={!isEditMeetingFormReady || isSubmittingEditMeeting}
+            startIcon={<EditOutlinedIcon fontSize="small" />}
+          >
+            {isSubmittingEditMeeting ? "Guardando..." : "Guardar cambios"}
           </Button>
         </DialogActions>
       </Dialog>
@@ -2899,7 +3421,7 @@ export function SpaTabSolicitudes({
         <DialogTitle>Enviar recordatorio</DialogTitle>
         <DialogContent>
           <Typography variant="body2" color="text.secondary" sx={{ mb: 1.2 }}>
-            Solicitud: {reminderDialogSolicitud?.titulo || "-"}
+            Pedido: {reminderDialogSolicitud?.titulo || "-"}
           </Typography>
           <TextField
             autoFocus
@@ -2909,7 +3431,7 @@ export function SpaTabSolicitudes({
             fullWidth
             value={reminderToEmail}
             onChange={(event) => setReminderToEmail(event.target.value)}
-            helperText="Si queda vacio, se enviara al responsable resuelto por el sistema."
+            helperText="Si queda vacío, se enviará a la persona a cargo resuelta por el sistema."
             disabled={Boolean(sendingReminderSolicitudId)}
           />
           <TextField

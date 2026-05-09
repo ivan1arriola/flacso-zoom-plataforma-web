@@ -101,6 +101,63 @@ export type PersonHoursResponse = {
   rates?: Record<string, { valorHora: number; moneda: string }>;
 };
 
+export type MonthlyAccountingPreviewRow = {
+  monthKey: string;
+  assistantId: string;
+  assistantName: string;
+  assistantEmail: string;
+  programaNombre: string;
+  titulo: string;
+  inicio: string;
+  fin: string;
+  modalidad: string;
+  minutos: number;
+  horas: number;
+  tarifaHora: number;
+  moneda: string;
+  importe: number;
+  horasVirtualesAsistenteMes: number;
+  horasHibridasAsistenteMes: number;
+  horasTotalesAsistenteMes: number;
+  montoTotalAsistenteMes: number;
+  horasTotalesMes: number;
+  montoTotalMes: number;
+  monedaTotalMes: string;
+};
+
+export type MonthlyAccountingPreview = {
+  monthKey: string;
+  generatedAt: string;
+  fileName: string;
+  totals: {
+    meetingsCount: number;
+    assistantsWithActivity: number;
+    totalMinutes: number;
+    totalHours: number;
+    totalAmount: number;
+    currency: string;
+  };
+  rates: {
+    VIRTUAL: { valorHora: number; moneda: string };
+    HIBRIDA: { valorHora: number; moneda: string };
+  };
+  assistants: Array<{
+    assistantId: string;
+    assistantName: string;
+    assistantEmail: string;
+    minutosVirtuales: number;
+    minutosHibridas: number;
+    minutosTotales: number;
+    horasVirtuales: number;
+    horasHibridas: number;
+    horasTotales: number;
+    montoVirtual: number;
+    montoHibrida: number;
+    montoTotal: number;
+  }>;
+  rows: MonthlyAccountingPreviewRow[];
+};
+
 export async function loadTarifas(): Promise<Tarifa[] | null> {
   const res = await fetch("/api/v1/tarifas-asistencia", { cache: "no-store" });
   if (!res.ok) return null;
@@ -246,6 +303,75 @@ export async function downloadMonthlyAccountingReport(monthKey?: string): Promis
   URL.revokeObjectURL(objectUrl);
 
   return { success: true };
+}
+
+export async function loadMonthlyAccountingReportPreview(monthKey?: string): Promise<{
+  success: boolean;
+  error?: string;
+  report?: MonthlyAccountingPreview;
+}> {
+  const params = new URLSearchParams();
+  params.set("preview", "1");
+  if (monthKey) {
+    params.set("month", monthKey);
+  }
+  const response = await fetch(`/api/v1/tarifas-asistencia/reporte-mensual?${params.toString()}`, {
+    method: "GET",
+    cache: "no-store"
+  });
+
+  const payload = (await response.json().catch(() => ({}))) as {
+    ok?: boolean;
+    error?: string;
+    report?: MonthlyAccountingPreview;
+  };
+
+  if (!response.ok || payload.ok === false || !payload.report) {
+    return {
+      success: false,
+      error: payload.error ?? "No se pudo previsualizar el informe mensual."
+    };
+  }
+
+  return {
+    success: true,
+    report: payload.report
+  };
+}
+
+export async function loadAllMonthlyAccountingReportPreviews(): Promise<{
+  success: boolean;
+  error?: string;
+  reports?: Array<
+    | ({ ok: true } & MonthlyAccountingPreview)
+    | { ok: false; monthKey: string; error: string }
+  >;
+}> {
+  const response = await fetch("/api/v1/tarifas-asistencia/reporte-mensual?preview=all", {
+    method: "GET",
+    cache: "no-store"
+  });
+
+  const payload = (await response.json().catch(() => ({}))) as {
+    ok?: boolean;
+    error?: string;
+    reports?: Array<
+      | ({ ok: true } & MonthlyAccountingPreview)
+      | { ok: false; monthKey: string; error: string }
+    >;
+  };
+
+  if (!response.ok || payload.ok === false || !Array.isArray(payload.reports)) {
+    return {
+      success: false,
+      error: payload.error ?? "No se pudieron cargar las previsualizaciones de informes."
+    };
+  }
+
+  return {
+    success: true,
+    reports: payload.reports
+  };
 }
 
 export async function uploadMonthlyAccountingReportToDrive(input?: {

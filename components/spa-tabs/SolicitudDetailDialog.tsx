@@ -101,6 +101,19 @@ export function SolicitudDetailDialog({
     }
   };
 
+  const formatTipoInstanciasLabel = (tipoInstancias: string) => {
+    switch (tipoInstancias) {
+      case "UNICA":
+        return "Una fecha";
+      case "VARIAS_FECHAS":
+        return "Varias fechas";
+      case "RECURRENCIA_ZOOM":
+        return "Reuniones recurrentes";
+      default:
+        return tipoInstancias;
+    }
+  };
+
   return (
     <Dialog 
       open={open} 
@@ -113,7 +126,7 @@ export function SolicitudDetailDialog({
     >
       <DialogTitle sx={{ m: 0, p: 2, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
         <Typography variant="h6" sx={{ fontWeight: 800 }}>
-          Detalles de la Solicitud
+          Detalles del pedido
         </Typography>
         <IconButton onClick={onClose} size="small">
           <CloseIcon />
@@ -173,6 +186,30 @@ export function SolicitudDetailDialog({
                     </Box>
                   </Box>
 
+                  {(solicitud.requiereAsistencia ?? solicitud.requiresAsistencia) ? (
+                    <Box sx={{ display: "flex", alignItems: "flex-start", gap: 1.5 }}>
+                      <InfoOutlinedIcon color="action" />
+                      <Box>
+                        <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 700, display: "block" }}>
+                          SALA DE ESPERA (INFORMATIVO)
+                        </Typography>
+                        {solicitud.salaEsperaPermitidos && solicitud.salaEsperaPermitidos.length > 0 ? (
+                          <Stack spacing={0.4}>
+                            {solicitud.salaEsperaPermitidos.map((entry, idx) => (
+                              <Typography key={`${entry.nombre ?? "-"}-${entry.correo ?? "-"}-${idx}`} variant="body2">
+                                {(entry.nombre ?? "").trim() || "Sin nombre"}{entry.correo ? ` (${entry.correo})` : ""}
+                              </Typography>
+                            ))}
+                          </Stack>
+                        ) : (
+                          <Typography variant="body2" color="text.secondary">
+                            Sin lista cargada
+                          </Typography>
+                        )}
+                      </Box>
+                    </Box>
+                  ) : null}
+
                   <Box sx={{ display: "flex", alignItems: "center", gap: 1.5 }}>
                     <CalendarMonthOutlinedIcon color="action" />
                     <Box>
@@ -180,7 +217,7 @@ export function SolicitudDetailDialog({
                         MODALIDAD
                       </Typography>
                       <Typography variant="body1" sx={{ fontWeight: 600 }}>
-                        {solicitud.modalidadReunion} ({solicitud.tipoInstancias})
+                        {solicitud.modalidadReunion} ({formatTipoInstanciasLabel(solicitud.tipoInstancias)})
                       </Typography>
                     </Box>
                   </Box>
@@ -205,7 +242,7 @@ export function SolicitudDetailDialog({
                     <InfoOutlinedIcon color="action" />
                     <Box sx={{ flex: 1 }}>
                       <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 700, display: "block" }}>
-                        MEETING ID
+                        ID DE REUNIÓN
                       </Typography>
                       <Stack direction="row" alignItems="center" spacing={1}>
                         <Typography variant="body1" sx={{ fontWeight: 700, fontFamily: "monospace", letterSpacing: 1 }}>
@@ -270,7 +307,7 @@ export function SolicitudDetailDialog({
 
             <Box>
               <Typography variant="subtitle1" sx={{ fontWeight: 800, mb: 2 }}>
-                Instancias Programadas ({solicitud.zoomInstanceCount || 0})
+                Fechas de reunión programadas ({solicitud.zoomInstanceCount || 0})
               </Typography>
               <Stack spacing={1}>
                 {solicitud.zoomInstances?.map((instance, idx) => (

@@ -25,6 +25,11 @@ import { EmailClient } from "@/src/lib/email.client";
 import { uploadFileToDriveFolder } from "@/src/lib/google-drive.client";
 import { logger } from "@/src/lib/logger";
 import {
+  buildMotivoAsistenciaWithWaitingRoom,
+  extractWaitingRoomAllowlistFromMotivo,
+  normalizeWaitingRoomAllowlistEntries
+} from "@/src/lib/waiting-room-allowlist";
+import {
   NOTIF_ACTIVITY_ZOOM_ASSISTANT_ASSIGNED,
   NOTIF_ACTIVITY_ZOOM_ASSISTANT_MEETING_UPDATED,
   NOTIF_ACTIVITY_ZOOM_ASSISTANT_UNASSIGNED,
@@ -193,6 +198,10 @@ export type CreateSolicitudInput = {
   requiereGrabacion?: boolean;
   requiereAsistencia?: boolean;
   motivoAsistencia?: string;
+  salaEsperaPermitidos?: Array<{
+    nombre?: string;
+    correo?: string;
+  }>;
   regimenEncuentros?: string;
   fechaFinRecurrencia?: string;
   patronRecurrencia?: Record<string, unknown>;
@@ -277,67 +286,10 @@ function getUserDisplayName(user: {
 }
 
 function buildDocenteSolicitudesWhere(user: SessionUser): Prisma.SolicitudSalaWhereInput {
-  const ownSolicitudesWhere: Prisma.SolicitudSalaWhereInput = {
+  return {
     docente: {
       usuarioId: user.id
     }
-  };
-
-  const emailCandidates = Array.from(
-    new Set(
-      [user.email, ...(user.emails ?? [])]
-        .map((value) => value.trim().toLowerCase())
-        .filter(Boolean)
-    )
-  );
-  const fullName = [user.firstName, user.lastName].filter(Boolean).join(" ").trim().toLowerCase();
-  const explicitName = (user.name ?? "").trim().toLowerCase();
-  const nameCandidates = Array.from(new Set([fullName, explicitName].filter(Boolean)));
-
-  const responsibleMatches: Prisma.SolicitudSalaWhereInput[] = [];
-  for (const email of emailCandidates) {
-    responsibleMatches.push({
-      responsableNombre: {
-        equals: email,
-        mode: Prisma.QueryMode.insensitive
-      }
-    });
-    responsibleMatches.push({
-      responsableNombre: {
-        contains: email,
-        mode: Prisma.QueryMode.insensitive
-      }
-    });
-  }
-  for (const name of nameCandidates) {
-    responsibleMatches.push({
-      responsableNombre: {
-        equals: name,
-        mode: Prisma.QueryMode.insensitive
-      }
-    });
-  }
-
-  if (responsibleMatches.length === 0) {
-    return ownSolicitudesWhere;
-  }
-
-  return {
-    OR: [
-      ownSolicitudesWhere,
-      {
-        AND: [
-          {
-            createdBy: {
-              role: UserRole.ADMINISTRADOR
-            }
-          },
-          {
-            OR: responsibleMatches
-          }
-        ]
-      }
-    ]
   };
 }
 
@@ -654,6 +606,122 @@ async function listUserAccessEmails(userId: string, fallbackEmail?: string | nul
   }
 
   return Array.from(unique.values());
+}
+
+function extractEmbeddedEmail(value: string): string | null {
+  const match = value.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i);
+  const extracted = match?.[0]?.trim().toLowerCase() ?? "";
+  return EMAIL_LINE_REGEX.test(extracted) ? extracted : null;
+}
+
+function buildUserAccessEmailsFromPayload(user: {
+  email: string;
+  emailAliases: Array<{ email: string }>;
+}): string[] {
+  return Array.from(
+    new Set([
+      user.email.trim().toLowerCase(),
+      ...user.emailAliases
+        .map((alias) => alias.email.trim().toLowerCase())
+        .filter(Boolean)
+    ])
+  );
+}
+
+async function resolveDocenteResponsibleUser(
+  responsableNombre?: string | null
+): Promise<{
+  userId: string;
+  primaryEmail: string;
+  accessEmails: string[];
+}> {
+  const normalized = (responsableNombre ?? "").trim();
+  if (!normalized) {
+    throw new Error("La persona a cargo es obligatoria.");
+  }
+
+  const emailCandidate =
+    extractEmbeddedEmail(normalized) ??
+    (EMAIL_LINE_REGEX.test(normalized.toLowerCase()) ? normalized.toLowerCase() : null);
+  const nameParts = normalized.split(/\s+/).filter(Boolean);
+  const firstName = nameParts[0] ?? "";
+  const lastName = nameParts.slice(1).join(" ");
+
+  const responsibleUser = await db.user.findFirst({
+    where: {
+      OR: [
+        ...(emailCandidate
+          ? [
+              {
+                email: {
+                  equals: emailCandidate,
+                  mode: Prisma.QueryMode.insensitive
+                }
+              },
+              {
+                emailAliases: {
+                  some: {
+                    email: {
+                      equals: emailCandidate,
+                      mode: Prisma.QueryMode.insensitive
+                    }
+                  }
+                }
+              }
+            ]
+          : []),
+        {
+          name: {
+            equals: normalized,
+            mode: Prisma.QueryMode.insensitive
+          }
+        },
+        ...(firstName && lastName
+          ? [
+              {
+                firstName: {
+                  equals: firstName,
+                  mode: Prisma.QueryMode.insensitive
+                },
+                lastName: {
+                  equals: lastName,
+                  mode: Prisma.QueryMode.insensitive
+                }
+              }
+            ]
+          : [])
+      ]
+    },
+    select: {
+      id: true,
+      email: true,
+      role: true,
+      emailAliases: {
+        select: {
+          email: true
+        }
+      }
+    }
+  });
+
+  if (!responsibleUser) {
+    throw new Error("No se pudo identificar al docente a cargo.");
+  }
+  if (responsibleUser.role !== UserRole.DOCENTE) {
+    throw new Error("La persona a cargo debe tener rol DOCENTE. Un administrador no puede estar a cargo.");
+  }
+
+  const accessEmails = buildUserAccessEmailsFromPayload(responsibleUser);
+  const primaryEmail = accessEmails[0] ?? responsibleUser.email.trim().toLowerCase();
+  if (!primaryEmail) {
+    throw new Error("No se pudo resolver el correo del docente a cargo.");
+  }
+
+  return {
+    userId: responsibleUser.id,
+    primaryEmail,
+    accessEmails
+  };
 }
 
 async function resolveResponsibleNotificationEmail(
@@ -1978,10 +2046,14 @@ function buildProvisionedEventPlans(
   return [];
 }
 
-async function getOrCreateDocente(user: SessionUser) {
-  const existing = await db.docente.findUnique({ where: { usuarioId: user.id } });
+async function getOrCreateDocenteByUserId(userId: string) {
+  const existing = await db.docente.findUnique({ where: { usuarioId: userId } });
   if (existing) return existing;
-  return db.docente.create({ data: { usuarioId: user.id } });
+  return db.docente.create({ data: { usuarioId: userId } });
+}
+
+async function getOrCreateDocente(user: SessionUser) {
+  return getOrCreateDocenteByUserId(user.id);
 }
 
 async function getOrCreateAsistente(user: SessionUser) {
@@ -4231,6 +4303,7 @@ export class SalasService {
         zoomHostAccount,
         zoomInstanceCount: zoomInstances.length || solicitud.cantidadInstancias || 1,
         estadoSolicitudVista,
+        salaEsperaPermitidos: extractWaitingRoomAllowlistFromMotivo(solicitud.motivoAsistencia),
         zoomInstances,
         zoomReadFromApi: Boolean(snapshot)
       };
@@ -4363,6 +4436,7 @@ export class SalasService {
       zoomInstances: instances,
       zoomInstanceCount: instances.length,
       zoomReadFromApi: !!snapshot,
+      salaEsperaPermitidos: extractWaitingRoomAllowlistFromMotivo(solicitud.motivoAsistencia),
       zoomJoinUrl:
         snapshot?.joinUrl ||
         solicitud.eventos.find((event) => Boolean((event.zoomJoinUrl ?? "").trim()))?.zoomJoinUrl ||
@@ -4753,6 +4827,157 @@ export class SalasService {
       cancelledAssignments: result.cancelledAssignments,
       notifiedAssistants,
       alreadyDisabled: false
+    };
+  }
+
+  async reassignRecurringSolicitudResponsable(
+    admin: SessionUser,
+    solicitudId: string,
+    input: {
+      responsableNombre: string;
+      docenteCreadorNombre?: string | null;
+    }
+  ) {
+    if (admin.role !== UserRole.ADMINISTRADOR) {
+      throw new Error("Solo administracion puede mover solicitudes recurrentes entre docentes.");
+    }
+
+    const solicitud = await db.solicitudSala.findUnique({
+      where: { id: solicitudId },
+      select: {
+        id: true,
+        titulo: true,
+        tipoInstancias: true,
+        estadoSolicitud: true,
+        docenteId: true,
+        createdByUserId: true,
+        responsableNombre: true,
+        docentesCorreos: true
+      }
+    });
+
+    if (!solicitud) {
+      throw new Error("Solicitud no encontrada.");
+    }
+
+    if (solicitud.tipoInstancias === TipoInstancias.UNICA) {
+      throw new Error("Solo se pueden mover solicitudes recurrentes.");
+    }
+
+    if (
+      solicitud.estadoSolicitud === EstadoSolicitudSala.CANCELADA_ADMIN ||
+      solicitud.estadoSolicitud === EstadoSolicitudSala.CANCELADA_DOCENTE
+    ) {
+      throw new Error("No se puede mover una solicitud cancelada.");
+    }
+
+    const responsibleDocente = await resolveDocenteResponsibleUser(input.responsableNombre);
+    const creatorDocente = input.docenteCreadorNombre?.trim()
+      ? await resolveDocenteResponsibleUser(input.docenteCreadorNombre)
+      : null;
+    const docenteProfile = await getOrCreateDocenteByUserId(responsibleDocente.userId);
+
+    const nextResponsible = responsibleDocente.primaryEmail;
+    const nextCreatedByUserId = creatorDocente?.userId ?? solicitud.createdByUserId;
+    const currentResponsible = (solicitud.responsableNombre ?? "").trim().toLowerCase();
+    const isSameDocente = solicitud.docenteId === docenteProfile.id;
+    const isSameCreator = solicitud.createdByUserId === nextCreatedByUserId;
+    const responsibleChanged = !(isSameDocente && currentResponsible === nextResponsible);
+    if (!responsibleChanged && isSameCreator) {
+      return {
+        updated: false,
+        solicitudId: solicitud.id,
+        docenteId: solicitud.docenteId,
+        responsableNombre: solicitud.responsableNombre ?? null,
+        createdByUserId: solicitud.createdByUserId
+      };
+    }
+
+    let nextDocentesCorreos = solicitud.docentesCorreos ?? null;
+    if (responsibleChanged) {
+      let existingDocentesCorreos: string[] = [];
+      try {
+        existingDocentesCorreos = parseDocentesEmailsByLine(solicitud.docentesCorreos);
+      } catch {
+        existingDocentesCorreos = [];
+      }
+      const firstEmail = existingDocentesCorreos[0] ?? "";
+      const linkedDocenteEmail = responsibleDocente.accessEmails.includes(firstEmail)
+        ? firstEmail
+        : responsibleDocente.primaryEmail;
+      nextDocentesCorreos =
+        normalizeDocentesCorreosForStorage(
+          [linkedDocenteEmail, ...existingDocentesCorreos.filter((email) => email !== linkedDocenteEmail)].join("\n")
+        ) ?? null;
+    }
+
+    const previousState = {
+      docenteId: solicitud.docenteId,
+      createdByUserId: solicitud.createdByUserId,
+      responsableNombre: solicitud.responsableNombre ?? null,
+      docentesCorreos: solicitud.docentesCorreos ?? null
+    };
+
+    const updatedSolicitud = await db.$transaction(async (tx) => {
+      const updated = await tx.solicitudSala.update({
+        where: { id: solicitud.id },
+        data: {
+          docenteId: responsibleChanged ? docenteProfile.id : solicitud.docenteId,
+          createdByUserId: nextCreatedByUserId,
+          responsableNombre: responsibleChanged ? nextResponsible : solicitud.responsableNombre,
+          docentesCorreos: responsibleChanged ? nextDocentesCorreos : solicitud.docentesCorreos
+        },
+        select: {
+          id: true,
+          docenteId: true,
+          createdByUserId: true,
+          responsableNombre: true,
+          docentesCorreos: true
+        }
+      });
+
+      await tx.auditoria.create({
+        data: {
+          actorUsuarioId: admin.id,
+          accion: "SOLICITUD_REASIGNADA_DOCENTE",
+          entidadTipo: "SolicitudSala",
+          entidadId: solicitud.id,
+          valorAnterior: previousState,
+          valorNuevo: {
+            docenteId: updated.docenteId,
+            createdByUserId: updated.createdByUserId,
+            responsableNombre: updated.responsableNombre ?? null,
+            docentesCorreos: updated.docentesCorreos ?? null
+          }
+        }
+      });
+
+      return updated;
+    });
+
+    await notifyAdminInAppMovement({
+      action: "SOLICITUD_REASIGNADA_DOCENTE",
+      actorEmail: admin.email,
+      actorFirstName: admin.firstName,
+      actorLastName: admin.lastName,
+      actorRole: admin.role,
+      entityType: "SolicitudSala",
+      entityId: solicitud.id,
+      summary: solicitud.titulo,
+      details: {
+        previousResponsable: previousState.responsableNombre,
+        newResponsable: updatedSolicitud.responsableNombre,
+        previousCreatedByUserId: previousState.createdByUserId,
+        newCreatedByUserId: updatedSolicitud.createdByUserId
+      }
+    });
+
+    return {
+      updated: true,
+      solicitudId: updatedSolicitud.id,
+      docenteId: updatedSolicitud.docenteId,
+      createdByUserId: updatedSolicitud.createdByUserId,
+      responsableNombre: updatedSolicitud.responsableNombre ?? null
     };
   }
 
@@ -5771,15 +5996,44 @@ export class SalasService {
   async createSolicitud(user: SessionUser, input: CreateSolicitudInput) {
     validateZoomRecurrenceRestrictions(input);
     const docentesCopyEmails = parseDocentesEmailsByLine(input.docentesCorreos);
-    const userAccessEmails = await listUserAccessEmails(user.id, user.email);
-    const linkedDocenteEmail = (docentesCopyEmails[0] ?? userAccessEmails[0] ?? user.email).trim().toLowerCase();
-    if (!userAccessEmails.includes(linkedDocenteEmail)) {
-      throw new Error("El correo vinculado de la reunion debe pertenecer al usuario que crea la solicitud.");
+    let docente = await getOrCreateDocente(user);
+    let responsableNombreVinculado = "";
+    let normalizedDocentesCorreos: string | undefined;
+
+    if (user.role === UserRole.DOCENTE) {
+      const userAccessEmails = await listUserAccessEmails(user.id, user.email);
+      const linkedDocenteEmail = (docentesCopyEmails[0] ?? userAccessEmails[0] ?? user.email).trim().toLowerCase();
+      if (!userAccessEmails.includes(linkedDocenteEmail)) {
+        throw new Error("El correo vinculado de la reunion debe pertenecer al usuario que crea la solicitud.");
+      }
+
+      responsableNombreVinculado = linkedDocenteEmail;
+      normalizedDocentesCorreos = normalizeDocentesCorreosForStorage(
+        [linkedDocenteEmail, ...docentesCopyEmails.filter((email) => email !== linkedDocenteEmail)].join("\n")
+      );
+    } else if (user.role === UserRole.ADMINISTRADOR) {
+      const responsibleDocente = await resolveDocenteResponsibleUser(input.responsableNombre);
+      docente = await getOrCreateDocenteByUserId(responsibleDocente.userId);
+
+      const linkedDocenteEmail = (
+        docentesCopyEmails[0] ??
+        responsibleDocente.accessEmails[0] ??
+        responsibleDocente.primaryEmail
+      )
+        .trim()
+        .toLowerCase();
+      if (!responsibleDocente.accessEmails.includes(linkedDocenteEmail)) {
+        throw new Error("El correo vinculado de la reunion debe pertenecer al docente a cargo.");
+      }
+
+      responsableNombreVinculado = responsibleDocente.primaryEmail;
+      normalizedDocentesCorreos = normalizeDocentesCorreosForStorage(
+        [linkedDocenteEmail, ...docentesCopyEmails.filter((email) => email !== linkedDocenteEmail)].join("\n")
+      );
+    } else {
+      throw new Error("Solo docentes y administradores pueden crear reuniones.");
     }
-    const normalizedDocentesCorreos = normalizeDocentesCorreosForStorage(
-      [linkedDocenteEmail, ...docentesCopyEmails.filter((email) => email !== linkedDocenteEmail)].join("\n")
-    );
-    const docente = await getOrCreateDocente(user);
+
     const start = toDate(input.fechaInicioSolicitada, "fechaInicioSolicitada");
     const end = toDate(input.fechaFinSolicitada, "fechaFinSolicitada");
     const recurrenceEnd = input.fechaFinRecurrencia
@@ -5790,6 +6044,10 @@ export class SalasService {
     const grabacionPreferencia = input.grabacionPreferencia ?? "NO";
     const requiereGrabacion =
       input.requiereGrabacion ?? grabacionPreferencia === "SI";
+    const waitingRoomAllowlist = normalizeWaitingRoomAllowlistEntries(input.salaEsperaPermitidos);
+    const motivoAsistencia = input.requiereAsistencia
+      ? buildMotivoAsistenciaWithWaitingRoom(input.motivoAsistencia, waitingRoomAllowlist)
+      : undefined;
 
     const notifyAdminsOnDocenteSolicitudCreate = async (
       solicitudId: string,
@@ -5861,7 +6119,7 @@ export class SalasService {
           docenteId: docente.id,
           createdByUserId: user.id,
           titulo: input.titulo,
-          responsableNombre: input.responsableNombre,
+          responsableNombre: responsableNombreVinculado,
           programaNombre: input.programaNombre,
           descripcion: input.descripcion,
           finalidadAcademica: input.finalidadAcademica,
@@ -5880,7 +6138,7 @@ export class SalasService {
           grabacionPreferencia,
           requiereGrabacion,
           requiereAsistencia: input.requiereAsistencia ?? false,
-          motivoAsistencia: input.motivoAsistencia,
+          motivoAsistencia,
           regimenEncuentros: input.regimenEncuentros,
           fechaFinRecurrencia: recurrenceEndForProvisioning,
           patronRecurrencia: inputForZoomProvisioning.patronRecurrencia as Prisma.InputJsonValue | undefined,
@@ -5922,7 +6180,7 @@ export class SalasService {
           titulo: input.titulo,
           modalidad: input.modalidadReunion,
           programaNombre: input.programaNombre ?? null,
-          responsableNombre: input.responsableNombre ?? null,
+          responsableNombre: responsableNombreVinculado || null,
           timezone,
           instanceStarts: instancePlans.map((plan) => plan.inicio),
           estadoSolicitud: EstadoSolicitudSala.PENDIENTE_RESOLUCION_MANUAL_ID
@@ -6026,7 +6284,7 @@ export class SalasService {
             docenteId: docente.id,
             createdByUserId: user.id,
             titulo: input.titulo,
-            responsableNombre: input.responsableNombre,
+            responsableNombre: responsableNombreVinculado,
             programaNombre: input.programaNombre,
             descripcion: input.descripcion,
             finalidadAcademica: input.finalidadAcademica,
@@ -6045,7 +6303,7 @@ export class SalasService {
             grabacionPreferencia,
             requiereGrabacion,
             requiereAsistencia: input.requiereAsistencia ?? false,
-            motivoAsistencia: input.motivoAsistencia,
+            motivoAsistencia,
             regimenEncuentros: input.regimenEncuentros,
             fechaFinRecurrencia: recurrenceEndForProvisioning,
             patronRecurrencia: inputForZoomProvisioning.patronRecurrencia as Prisma.InputJsonValue | undefined,
@@ -6091,7 +6349,7 @@ export class SalasService {
             titulo: input.titulo,
             modalidad: input.modalidadReunion,
             programaNombre: input.programaNombre ?? null,
-            responsableNombre: input.responsableNombre ?? null,
+            responsableNombre: responsableNombreVinculado || null,
             timezone,
             instanceStarts: instancePlans.map((plan) => plan.inicio),
             estadoSolicitud: EstadoSolicitudSala.PENDIENTE_RESOLUCION_MANUAL_ID
@@ -6130,7 +6388,7 @@ export class SalasService {
           createdByUserId: user.id,
           cuentaZoomAsignadaId: assignedAccount.id,
           titulo: input.titulo,
-          responsableNombre: input.responsableNombre,
+          responsableNombre: responsableNombreVinculado,
           programaNombre: input.programaNombre,
           descripcion: input.descripcion,
           finalidadAcademica: input.finalidadAcademica,
@@ -6148,7 +6406,7 @@ export class SalasService {
           grabacionPreferencia,
           requiereGrabacion,
           requiereAsistencia: input.requiereAsistencia ?? false,
-          motivoAsistencia: input.motivoAsistencia,
+          motivoAsistencia,
           regimenEncuentros: input.regimenEncuentros,
           fechaFinRecurrencia: recurrenceEndForProvisioning,
           patronRecurrencia: inputForZoomProvisioning.patronRecurrencia as Prisma.InputJsonValue | undefined,
@@ -6283,7 +6541,7 @@ export class SalasService {
         provisionedPlans.find((plan) => typeof plan.joinUrl === "string" && plan.joinUrl)?.joinUrl ??
         null;
       const hostAccount = primaryZoomSnapshot?.hostEmail ?? assignedAccount.ownerEmail ?? assignedAccount.nombreCuenta ?? null;
-      const responsibleEmail = await resolveResponsibleNotificationEmail(input.responsableNombre);
+      const responsibleEmail = await resolveResponsibleNotificationEmail(responsableNombreVinculado);
       const confirmationCc = [
         ...docentesCopyEmails,
         ...(responsibleEmail ? [responsibleEmail] : [])
@@ -6320,7 +6578,7 @@ export class SalasService {
         titulo: input.titulo,
         modalidad: input.modalidadReunion,
         programaNombre: input.programaNombre ?? null,
-        responsableNombre: input.responsableNombre ?? null,
+        responsableNombre: responsableNombreVinculado || null,
         timezone,
         instanceStarts: startsForAssistantPool,
         estadoSolicitud: status
@@ -6336,7 +6594,7 @@ export class SalasService {
         titulo: input.titulo,
         modalidad: input.modalidadReunion,
         programaNombre: input.programaNombre ?? null,
-        responsableNombre: input.responsableNombre ?? null,
+        responsableNombre: responsableNombreVinculado || null,
         timezone,
         instanceStarts: startsForAssistantPool,
         estadoSolicitud: status
@@ -9113,10 +9371,12 @@ export class SalasService {
         solicitud: {
           select: {
             id: true,
+            docenteId: true,
             createdByUserId: true,
             titulo: true,
             programaNombre: true,
             responsableNombre: true,
+            docentesCorreos: true,
             descripcion: true,
             timezone: true,
             meetingPrincipalId: true,
@@ -9192,7 +9452,7 @@ export class SalasService {
       typeof input.programaNombre === "string"
         ? input.programaNombre.trim()
         : previousProgram;
-    const normalizedResponsible =
+    let normalizedResponsible =
       typeof input.responsableNombre === "string"
         ? input.responsableNombre.trim()
         : previousResponsible;
@@ -9230,6 +9490,45 @@ export class SalasService {
       hasTimezoneInput && (input.timezone ?? "").trim().length > 0
         ? (input.timezone as string).trim()
         : previousTimezone;
+
+    let nextDocenteId = event.solicitud.docenteId;
+    let nextDocentesCorreos: string | null = event.solicitud.docentesCorreos ?? null;
+
+    if (typeof input.responsableNombre === "string") {
+      const requestedResponsible = input.responsableNombre.trim();
+      if (!requestedResponsible) {
+        throw new Error("La persona a cargo es obligatoria.");
+      }
+
+      if (!canManageAsAdmin && requestedResponsible !== previousResponsible) {
+        throw new Error("Solo administracion puede cambiar la persona a cargo.");
+      }
+
+      if (requestedResponsible !== previousResponsible) {
+        const responsibleDocente = await resolveDocenteResponsibleUser(normalizedResponsible);
+        const docenteProfile = await getOrCreateDocenteByUserId(responsibleDocente.userId);
+        normalizedResponsible = responsibleDocente.primaryEmail;
+        nextDocenteId = docenteProfile.id;
+
+        let existingDocentesCorreos: string[] = [];
+        try {
+          existingDocentesCorreos = parseDocentesEmailsByLine(event.solicitud.docentesCorreos);
+        } catch {
+          existingDocentesCorreos = [];
+        }
+
+        const firstEmail = existingDocentesCorreos[0] ?? "";
+        const linkedDocenteEmail = responsibleDocente.accessEmails.includes(firstEmail)
+          ? firstEmail
+          : responsibleDocente.primaryEmail;
+        nextDocentesCorreos =
+          normalizeDocentesCorreosForStorage(
+            [linkedDocenteEmail, ...existingDocentesCorreos.filter((email) => email !== linkedDocenteEmail)].join("\n")
+          ) ?? null;
+      } else {
+        normalizedResponsible = previousResponsible;
+      }
+    }
 
     const titleChanged = normalizedTitle !== previousTitle;
     const programChanged = normalizedProgram !== previousProgram;
@@ -9447,9 +9746,11 @@ export class SalasService {
       await tx.solicitudSala.update({
         where: { id: event.solicitud.id },
         data: {
+          docenteId: responsibleChanged ? nextDocenteId : event.solicitud.docenteId,
           titulo: normalizedTitle,
           programaNombre: normalizedProgram || null,
           responsableNombre: normalizedResponsible || null,
+          docentesCorreos: responsibleChanged ? nextDocentesCorreos : event.solicitud.docentesCorreos,
           descripcion: normalizedDescription,
           timezone: nextTimezone,
           fechaInicioSolicitada: firstEvent.inicioProgramadoAt,
@@ -9625,6 +9926,8 @@ export class SalasService {
     if (!responsableNombre) {
       throw new Error("responsableNombre es requerido.");
     }
+    const responsibleDocente = await resolveDocenteResponsibleUser(responsableNombre);
+    const responsableNombreVinculado = responsibleDocente.primaryEmail;
 
     const programaNombre = input.programaNombre.trim();
     if (!programaNombre) {
@@ -9672,7 +9975,7 @@ export class SalasService {
       );
     }
 
-    const docente = await getOrCreateDocente(admin);
+    const docente = await getOrCreateDocenteByUserId(responsibleDocente.userId);
     const timezone = input.timezone?.trim() || "America/Montevideo";
     const requiereAsistencia = input.requiereAsistencia ?? false;
     const baseDurationMinutes = Math.max(1, Math.floor((end.getTime() - start.getTime()) / 60000));
@@ -9745,7 +10048,7 @@ export class SalasService {
           createdByUserId: admin.id,
           cuentaZoomAsignadaId: account.id,
           titulo,
-          responsableNombre,
+          responsableNombre: responsableNombreVinculado,
           programaNombre,
           descripcion:
             input.descripcion?.trim() ||
@@ -9877,7 +10180,7 @@ export class SalasService {
         titulo,
         modalidad: input.modalidadReunion,
         programaNombre: programaNombre || null,
-        responsableNombre: responsableNombre || null,
+        responsableNombre: responsableNombreVinculado || null,
         timezone,
         instanceStarts: instancePlans.map((plan) => plan.inicio),
         estadoSolicitud: EstadoSolicitudSala.PROVISIONADA
@@ -9893,7 +10196,7 @@ export class SalasService {
         titulo,
         modalidad: input.modalidadReunion,
         programaNombre: programaNombre || null,
-        responsableNombre: responsableNombre || null,
+        responsableNombre: responsableNombreVinculado || null,
         timezone,
         instanceStarts: instancePlans.map((plan) => plan.inicio),
         estadoSolicitud: EstadoSolicitudSala.PROVISIONADA
@@ -9965,9 +10268,9 @@ export class SalasService {
     if (!responsableUser) {
       throw new Error("No existe un usuario responsable con ese email.");
     }
-    const validResponsibleRoles: UserRole[] = [UserRole.DOCENTE, UserRole.ADMINISTRADOR];
+    const validResponsibleRoles: UserRole[] = [UserRole.DOCENTE];
     if (!validResponsibleRoles.includes(responsableUser.role)) {
-      throw new Error("La persona responsable debe tener rol DOCENTE o ADMINISTRADOR.");
+      throw new Error("La persona responsable debe tener rol DOCENTE. Un administrador no puede estar a cargo.");
     }
 
     const monitorUser = await db.user.findUnique({
@@ -10256,6 +10559,7 @@ export class SalasService {
         moneda: hibridaRate?.moneda ?? ""
       }
     };
+    const now = new Date();
 
     const assignments = await db.asignacionAsistente.findMany({
       where: {
@@ -10270,7 +10574,6 @@ export class SalasService {
         },
         evento: {
           requiereAsistencia: true,
-          estadoEjecucion: EstadoEjecucionEvento.EJECUTADO,
           estadoEvento: { not: EstadoEventoZoom.CANCELADO },
           inicioProgramadoAt: {
             gte: queryStart,
@@ -10301,6 +10604,8 @@ export class SalasService {
             inicioRealAt: true,
             finRealAt: true,
             minutosReales: true,
+            estadoEvento: true,
+            estadoEjecucion: true,
             timezone: true,
             solicitud: {
               select: {
@@ -10387,6 +10692,20 @@ export class SalasService {
     for (const assignment of assignments) {
       const timezone = assignment.evento.timezone || "America/Montevideo";
       if (toMonthKey(assignment.evento.inicioProgramadoAt, timezone) !== monthKey) {
+        continue;
+      }
+      const completionReferenceEnd = assignment.evento.finRealAt ?? assignment.evento.finProgramadoAt;
+      const isCompleted =
+        assignment.evento.estadoEvento !== EstadoEventoZoom.CANCELADO &&
+        (
+          assignment.evento.estadoEjecucion === EstadoEjecucionEvento.EJECUTADO ||
+          (
+            completionReferenceEnd <= now &&
+            assignment.evento.estadoEjecucion !== EstadoEjecucionEvento.NO_REALIZADO
+          )
+        );
+
+      if (!isCompleted) {
         continue;
       }
 
@@ -10505,31 +10824,97 @@ export class SalasService {
     const summaryByAssistantId = new Map(
       assistantSummaries.map((assistant) => [assistant.assistantId, assistant] as const)
     );
-    const reportRows = details.map((detail) => {
+    const previewRows = details.map((detail) => {
       const assistantSummary = summaryByAssistantId.get(detail.assistantId);
       return {
-        Mes: monthKey,
-        Asistente: detail.assistantName,
-        Email: detail.assistantEmail,
-        Programa: detail.programaNombre || "Sin programa",
-        Encuentro: detail.titulo,
-        Inicio: formatDateTime(detail.inicio, detail.timeZone),
-        Fin: formatDateTime(detail.fin, detail.timeZone),
-        Modalidad: detail.modalidad,
-        "Duracion (min)": detail.minutos,
-        "Duracion (h)": formatNumber(detail.horas),
-        "Tarifa hora": formatNumber(detail.tarifaHora),
-        Moneda: detail.moneda,
-        Importe: formatNumber(detail.monto),
-        "Horas virtuales asistente (mes)": formatNumber(assistantSummary?.horasVirtuales ?? 0),
-        "Horas hibridas asistente (mes)": formatNumber(assistantSummary?.horasHibridas ?? 0),
-        "Horas totales asistente (mes)": formatNumber(assistantSummary?.horasTotales ?? 0),
-        "Monto total asistente (mes)": formatNumber(assistantSummary?.montoTotal ?? 0),
-        "Horas totales mes": formatNumber(totalHours),
-        "Monto total mes": formatNumber(totalAmount),
-        "Moneda total mes": totalCurrency
+        monthKey,
+        assistantId: detail.assistantId,
+        assistantName: detail.assistantName,
+        assistantEmail: detail.assistantEmail,
+        programaNombre: detail.programaNombre || "Sin programa",
+        titulo: detail.titulo,
+        inicio: formatDateTime(detail.inicio, detail.timeZone),
+        fin: formatDateTime(detail.fin, detail.timeZone),
+        modalidad: detail.modalidad,
+        minutos: detail.minutos,
+        horas: formatNumber(detail.horas),
+        tarifaHora: formatNumber(detail.tarifaHora),
+        moneda: detail.moneda,
+        importe: formatNumber(detail.monto),
+        horasVirtualesAsistenteMes: formatNumber(assistantSummary?.horasVirtuales ?? 0),
+        horasHibridasAsistenteMes: formatNumber(assistantSummary?.horasHibridas ?? 0),
+        horasTotalesAsistenteMes: formatNumber(assistantSummary?.horasTotales ?? 0),
+        montoTotalAsistenteMes: formatNumber(assistantSummary?.montoTotal ?? 0),
+        horasTotalesMes: formatNumber(totalHours),
+        montoTotalMes: formatNumber(totalAmount),
+        monedaTotalMes: totalCurrency
       };
     });
+    const reportRows = previewRows.map((detail) => {
+      return {
+        Mes: detail.monthKey,
+        Asistente: detail.assistantName,
+        Email: detail.assistantEmail,
+        Programa: detail.programaNombre,
+        Encuentro: detail.titulo,
+        Inicio: detail.inicio,
+        Fin: detail.fin,
+        Modalidad: detail.modalidad,
+        "Duracion (min)": detail.minutos,
+        "Duracion (h)": detail.horas,
+        "Tarifa hora": detail.tarifaHora,
+        Moneda: detail.moneda,
+        Importe: detail.importe,
+        "Horas virtuales asistente (mes)": detail.horasVirtualesAsistenteMes,
+        "Horas hibridas asistente (mes)": detail.horasHibridasAsistenteMes,
+        "Horas totales asistente (mes)": detail.horasTotalesAsistenteMes,
+        "Monto total asistente (mes)": detail.montoTotalAsistenteMes,
+        "Horas totales mes": detail.horasTotalesMes,
+        "Monto total mes": detail.montoTotalMes,
+        "Moneda total mes": detail.monedaTotalMes
+      };
+    });
+    const assistantPreview = assistantSummaries.map((assistant) => {
+      return {
+        assistantId: assistant.assistantId,
+        assistantName: assistant.assistantName,
+        assistantEmail: assistant.assistantEmail,
+        minutosVirtuales: assistant.minutosVirtuales,
+        minutosHibridas: assistant.minutosHibridas,
+        minutosTotales: assistant.minutosTotales,
+        horasVirtuales: formatNumber(assistant.horasVirtuales),
+        horasHibridas: formatNumber(assistant.horasHibridas),
+        horasTotales: formatNumber(assistant.horasTotales),
+        montoVirtual: formatNumber(assistant.montoVirtual),
+        montoHibrida: formatNumber(assistant.montoHibrida),
+        montoTotal: formatNumber(assistant.montoTotal)
+      };
+    });
+    const reportPreview = {
+      monthKey,
+      generatedAt: new Date().toISOString(),
+      fileName: `informe-contaduria-${monthKey}.xlsx`,
+      totals: {
+        meetingsCount: previewRows.length,
+        assistantsWithActivity: assistantPreview.length,
+        totalMinutes,
+        totalHours: formatNumber(totalHours),
+        totalAmount: formatNumber(totalAmount),
+        currency: totalCurrency
+      },
+      rates: {
+        VIRTUAL: {
+          valorHora: formatNumber(ratesByModalidad.VIRTUAL.valorHora),
+          moneda: ratesByModalidad.VIRTUAL.moneda
+        },
+        HIBRIDA: {
+          valorHora: formatNumber(ratesByModalidad.HIBRIDA.valorHora),
+          moneda: ratesByModalidad.HIBRIDA.moneda
+        }
+      },
+      assistants: assistantPreview,
+      rows: previewRows
+    };
 
     const workbook = XLSX.utils.book_new();
     const unifiedSheet = XLSX.utils.json_to_sheet(reportRows);
@@ -10539,9 +10924,10 @@ export class SalasService {
 
     return {
       monthKey,
-      fileName: `informe-contaduria-${monthKey}.xlsx`,
+      fileName: reportPreview.fileName,
       contentType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-      content
+      content,
+      preview: reportPreview
     };
   }
 

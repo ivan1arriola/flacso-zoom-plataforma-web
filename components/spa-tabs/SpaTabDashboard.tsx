@@ -46,9 +46,11 @@ import { formatZoomDateTime } from "./spa-tabs-utils";
 import type { DashboardSummary } from "@/src/services/dashboardApi";
 import {
   downloadMonthlyAccountingReport,
+  loadAllMonthlyAccountingReportPreviews,
   loadPersonHours,
   loadTarifas,
   uploadMonthlyAccountingReportToDrive,
+  type MonthlyAccountingPreview,
   type PersonHoursMeeting,
   type PersonHoursPerson,
   type Tarifa
@@ -97,6 +99,10 @@ type DashboardRoleConfig = {
   priorityItems: string[];
 };
 
+type MonthlyReportPreviewResult =
+  | ({ ok: true } & MonthlyAccountingPreview)
+  | { ok: false; monthKey: string; error: string };
+
 const SEMANTIC_METRIC_COLORS = {
   info: "#0288D1",
   success: "#2E7D32",
@@ -128,6 +134,20 @@ function formatMonthKey(monthKey: string): string {
   if (!Number.isFinite(year) || !Number.isFinite(month)) return monthKey;
   const date = new Date(Date.UTC(year, Math.max(0, month - 1), 1));
   return date.toLocaleDateString("es-UY", { month: "long", year: "numeric", timeZone: "UTC" });
+}
+
+function compareMonthKeysDesc(left: string, right: string): number {
+  const [leftYearRaw = "0", leftMonthRaw = "0"] = left.split("-");
+  const [rightYearRaw = "0", rightMonthRaw = "0"] = right.split("-");
+  const leftYear = Number(leftYearRaw);
+  const leftMonth = Number(leftMonthRaw);
+  const rightYear = Number(rightYearRaw);
+  const rightMonth = Number(rightMonthRaw);
+
+  if (!Number.isFinite(leftYear) || !Number.isFinite(leftMonth)) return 1;
+  if (!Number.isFinite(rightYear) || !Number.isFinite(rightMonth)) return -1;
+  if (leftYear !== rightYear) return rightYear - leftYear;
+  return rightMonth - leftMonth;
 }
 
 function getCurrentMonthKey(): string {
@@ -304,7 +324,7 @@ function deriveAdminStatus(summary: DashboardSummary): DashboardStatus {
     return {
       label: "Gestión",
       color: "warning",
-      message: `Tienes ${totalManual} solicitudes que requieren intervención manual.`
+      message: `Tienes ${totalManual} pedidos que requieren intervención manual.`
     };
   }
 
@@ -381,7 +401,7 @@ function deriveDocenteStatus(summary: DashboardSummary): DashboardStatus {
     return {
       label: "Sin actividad",
       color: "warning",
-      message: "Todavia no tienes solicitudes registradas."
+      message: "Todavía no tienes pedidos registrados."
     };
   }
 
@@ -389,7 +409,7 @@ function deriveDocenteStatus(summary: DashboardSummary): DashboardStatus {
     return {
       label: "En seguimiento",
       color: "success",
-      message: "Tus solicitudes y reuniones proximas estan bajo seguimiento."
+      message: "Tus pedidos y reuniones próximas están bajo seguimiento."
     };
   }
 
@@ -404,13 +424,13 @@ function buildRoleConfig(role: DashboardRole, summary: DashboardSummary): Dashbo
   if (role === "DOCENTE") {
     return {
       title: "Mi actividad académica",
-      subtitle: "Gestión centralizada de tus sesiones y solicitudes de Zoom.",
+      subtitle: "Gestión centralizada de tus sesiones y pedidos de Zoom.",
       headerIcon: <SchoolIcon fontSize="small" />,
       background: "linear-gradient(135deg, rgba(23,95,161,0.10) 0%, rgba(56,132,255,0.12) 100%)",
       metrics: [
         {
           key: "solicitudesTotales",
-          title: "Mis Solicitudes",
+          title: "Mis pedidos",
           description: "Total de programas o pedidos creados.",
           semanticColor: "info",
           icon: <AssignmentTurnedInIcon fontSize="small" />
@@ -430,8 +450,8 @@ function buildRoleConfig(role: DashboardRole, summary: DashboardSummary): Dashbo
             `${metricValue(summary, "reunionesConZoom")} sesión(es) con link de Zoom generado.`
           ]
         : [
-            "No hay solicitudes registradas en tu perfil.",
-            "Crea una nueva solicitud para iniciar la gestión de tu reunión."
+            "No hay pedidos registrados en tu perfil.",
+            "Crea un nuevo pedido para iniciar la gestión de tu reunión."
           ]
     };
   }
@@ -557,7 +577,7 @@ function buildRoleConfig(role: DashboardRole, summary: DashboardSummary): Dashbo
     metrics: [
       {
         key: "solicitudesActivas",
-        title: "Solicitudes vigentes",
+        title: "Pedidos vigentes",
         description: "En curso o programadas para el futuro.",
         semanticColor: "success",
         icon: <PendingActionsIcon fontSize="small" />
@@ -653,6 +673,9 @@ export function SpaTabDashboard({
   const [uploadReportError, setUploadReportError] = useState("");
   const [uploadReportSuccess, setUploadReportSuccess] = useState("");
   const [uploadReportLink, setUploadReportLink] = useState<string | null>(null);
+  const [isLoadingReportPreviews, setIsLoadingReportPreviews] = useState(false);
+  const [reportPreviewsError, setReportPreviewsError] = useState("");
+  const [reportPreviews, setReportPreviews] = useState<MonthlyReportPreviewResult[]>([]);
   const [tarifasByModalidad, setTarifasByModalidad] = useState<Record<"VIRTUAL" | "HIBRIDA", Tarifa | null>>({
     VIRTUAL: null,
     HIBRIDA: null
@@ -678,7 +701,7 @@ export function SpaTabDashboard({
       const currentMonthKey = getCurrentMonthKey();
       const closedMonthsWithRecords = (payload.availableMonthKeys ?? [])
         .filter((monthKey) => monthKey && monthKey < currentMonthKey)
-        .sort((left, right) => right.localeCompare(left));
+        .sort(compareMonthKeysDesc);
       setAvailableReportMonths(closedMonthsWithRecords);
 
       const preferredMonthKey = getPreviousMonthKey();
@@ -691,6 +714,7 @@ export function SpaTabDashboard({
         }
         return closedMonthsWithRecords[0] ?? preferredMonthKey;
       });
+      void refreshAllMonthlyReportPreviews();
 
       const detailPayloads = await Promise.all(
         (payload.people ?? []).map(async (person) => {
@@ -705,6 +729,28 @@ export function SpaTabDashboard({
       setAssistantCards(detailPayloads.sort((left, right) => left.person.nombre.localeCompare(right.person.nombre, "es")));
     } finally {
       setIsLoadingPersonHours(false);
+    }
+  }
+
+  async function refreshAllMonthlyReportPreviews() {
+    setIsLoadingReportPreviews(true);
+    setReportPreviewsError("");
+    try {
+      const result = await loadAllMonthlyAccountingReportPreviews();
+      if (!result.success) {
+        setReportPreviews([]);
+        setReportPreviewsError(
+          result.error ?? "No se pudieron cargar las previsualizaciones de informes."
+        );
+        return;
+      }
+
+      const normalized = (result.reports ?? []).sort((left, right) =>
+        compareMonthKeysDesc(left.monthKey, right.monthKey)
+      );
+      setReportPreviews(normalized);
+    } finally {
+      setIsLoadingReportPreviews(false);
     }
   }
 
@@ -974,7 +1020,7 @@ export function SpaTabDashboard({
                   sx={{ minWidth: { sm: 180 } }}
                   helperText={
                     availableReportMonths.length > 0
-                      ? "Solo meses cerrados con registros."
+                      ? "Solo meses cerrados con registros, del mas reciente al menos reciente."
                       : "No hay meses cerrados con registros disponibles."
                   }
                 >
@@ -992,6 +1038,15 @@ export function SpaTabDashboard({
                   }}
                 >
                   Actualizar
+                </Button>
+                <Button
+                  variant="outlined"
+                  disabled={isLoadingReportPreviews}
+                  onClick={() => {
+                    void refreshAllMonthlyReportPreviews();
+                  }}
+                >
+                  {isLoadingReportPreviews ? "Cargando previas..." : "Previsualizar informes"}
                 </Button>
                 <Button
                   variant="contained"
@@ -1066,6 +1121,11 @@ export function SpaTabDashboard({
             {uploadReportError ? (
               <Alert severity="error" sx={{ mb: 1.2 }}>
                 {uploadReportError}
+              </Alert>
+            ) : null}
+            {reportPreviewsError ? (
+              <Alert severity="error" sx={{ mb: 1.2 }}>
+                {reportPreviewsError}
               </Alert>
             ) : null}
             {uploadReportSuccess ? (
@@ -1158,6 +1218,151 @@ export function SpaTabDashboard({
             Las tarifas tienen monedas distintas entre virtual e hibrida. Revisa conversion antes de liquidar.
           </Alert>
         ) : null}
+
+        <Card variant="outlined" sx={{ borderRadius: 3 }}>
+          <CardContent>
+            <Stack
+              direction={{ xs: "column", md: "row" }}
+              spacing={1}
+              alignItems={{ xs: "flex-start", md: "center" }}
+              justifyContent="space-between"
+              sx={{ mb: 1.2 }}
+            >
+              <Box>
+                <Typography variant="h6" sx={{ fontWeight: 800 }}>
+                  Previsualizacion de informes
+                </Typography>
+                <Typography variant="body2" color="text.secondary">
+                  Vista previa de todos los meses cerrados con registros antes de descargar o subir a Drive.
+                </Typography>
+              </Box>
+              <Chip
+                size="small"
+                color={reportPreviews.length > 0 ? "success" : "warning"}
+                label={`${reportPreviews.length} meses`}
+              />
+            </Stack>
+
+            {isLoadingReportPreviews ? (
+              <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
+                Cargando previsualizaciones...
+              </Typography>
+            ) : null}
+
+            {!isLoadingReportPreviews && reportPreviews.length === 0 ? (
+              <Typography variant="body2" color="text.secondary">
+                No hay previsualizaciones disponibles aun.
+              </Typography>
+            ) : null}
+
+            <Stack spacing={1}>
+              {reportPreviews.map((previewItem) => {
+                if (!previewItem.ok) {
+                  return (
+                    <Card key={previewItem.monthKey} variant="outlined" sx={{ borderRadius: 2 }}>
+                      <CardContent sx={{ p: 1.2 }}>
+                        <Typography variant="subtitle2" sx={{ fontWeight: 800, mb: 0.6 }}>
+                          {formatMonthKey(previewItem.monthKey)}
+                        </Typography>
+                        <Alert severity="error" sx={{ py: 0.2 }}>
+                          {previewItem.error}
+                        </Alert>
+                      </CardContent>
+                    </Card>
+                  );
+                }
+
+                return (
+                  <Card key={previewItem.monthKey} variant="outlined" sx={{ borderRadius: 2 }}>
+                    <CardContent sx={{ p: 1.2 }}>
+                      <Stack
+                        direction={{ xs: "column", lg: "row" }}
+                        spacing={1}
+                        alignItems={{ xs: "flex-start", lg: "center" }}
+                        justifyContent="space-between"
+                        sx={{ mb: 1 }}
+                      >
+                        <Stack direction="row" spacing={0.8} useFlexGap flexWrap="wrap">
+                          <Chip variant="outlined" label={formatMonthKey(previewItem.monthKey)} />
+                          <Chip variant="outlined" label={`${previewItem.totals.meetingsCount} reuniones`} />
+                          <Chip variant="outlined" label={`${previewItem.totals.assistantsWithActivity} asistentes`} />
+                          <Chip variant="outlined" label={`${formatHours(previewItem.totals.totalHours)} totales`} />
+                        </Stack>
+                        <Typography variant="body2" sx={{ fontWeight: 700 }}>
+                          Total: {formatMoney(previewItem.totals.totalAmount, previewItem.totals.currency)}
+                        </Typography>
+                      </Stack>
+
+                      <Typography variant="caption" color="text.secondary">
+                        Tarifas: Virtual {formatMoney(previewItem.rates.VIRTUAL.valorHora, previewItem.rates.VIRTUAL.moneda)} | Hibrida{" "}
+                        {formatMoney(previewItem.rates.HIBRIDA.valorHora, previewItem.rates.HIBRIDA.moneda)}
+                      </Typography>
+
+                      <Box sx={{ mt: 1, overflowX: "auto" }}>
+                        <Box
+                          component="table"
+                          sx={{
+                            width: "100%",
+                            borderCollapse: "collapse",
+                            fontSize: 12
+                          }}
+                        >
+                          <Box component="thead">
+                            <Box component="tr">
+                              {["Asistente", "Programa", "Encuentro", "Inicio", "Modalidad", "Horas", "Importe"].map((label) => (
+                                <Box
+                                  key={label}
+                                  component="th"
+                                  sx={{
+                                    textAlign: "left",
+                                    py: 0.7,
+                                    px: 0.8,
+                                    borderBottom: "1px solid",
+                                    borderColor: "divider",
+                                    whiteSpace: "nowrap"
+                                  }}
+                                >
+                                  {label}
+                                </Box>
+                              ))}
+                            </Box>
+                          </Box>
+                          <Box component="tbody">
+                            {previewItem.rows.map((row, index) => (
+                              <Box component="tr" key={`${previewItem.monthKey}-${row.assistantId}-${index}`}>
+                                <Box component="td" sx={{ py: 0.7, px: 0.8, borderBottom: "1px solid", borderColor: "divider" }}>
+                                  {row.assistantName}
+                                </Box>
+                                <Box component="td" sx={{ py: 0.7, px: 0.8, borderBottom: "1px solid", borderColor: "divider" }}>
+                                  {row.programaNombre}
+                                </Box>
+                                <Box component="td" sx={{ py: 0.7, px: 0.8, borderBottom: "1px solid", borderColor: "divider" }}>
+                                  {row.titulo}
+                                </Box>
+                                <Box component="td" sx={{ py: 0.7, px: 0.8, borderBottom: "1px solid", borderColor: "divider", whiteSpace: "nowrap" }}>
+                                  {row.inicio}
+                                </Box>
+                                <Box component="td" sx={{ py: 0.7, px: 0.8, borderBottom: "1px solid", borderColor: "divider" }}>
+                                  {row.modalidad}
+                                </Box>
+                                <Box component="td" sx={{ py: 0.7, px: 0.8, borderBottom: "1px solid", borderColor: "divider", whiteSpace: "nowrap" }}>
+                                  {formatHours(row.horas)}
+                                </Box>
+                                <Box component="td" sx={{ py: 0.7, px: 0.8, borderBottom: "1px solid", borderColor: "divider", whiteSpace: "nowrap" }}>
+                                  {formatMoney(row.importe, row.moneda)}
+                                </Box>
+                              </Box>
+                            ))}
+                          </Box>
+                        </Box>
+                      </Box>
+                    </CardContent>
+                  </Card>
+                );
+              })}
+            </Stack>
+          </CardContent>
+        </Card>
 
         <Stack spacing={1.2}>
           {cards.map((card) => (
@@ -1484,7 +1689,7 @@ export function SpaTabDashboard({
                       </Box>
                     </Stack>
                     <Typography variant="body2" sx={{ mt: 1.5, color: toneColor("info"), fontWeight: 500 }}>
-                      Solicitudes pendientes o no resueltas que requieren tu intervención.
+                      Pedidos pendientes o no resueltos que requieren tu intervención.
                     </Typography>
                   </CardContent>
                 </Card>
@@ -1556,7 +1761,7 @@ export function SpaTabDashboard({
                       "&:hover": { borderColor: "white", bgcolor: "rgba(255,255,255,0.1)" }
                     }}
                   >
-                    Nueva solicitud
+                    Nuevo pedido
                   </Button>
                 </Stack>
               </Grid>
