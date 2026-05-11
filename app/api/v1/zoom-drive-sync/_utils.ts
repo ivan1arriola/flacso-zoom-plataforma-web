@@ -99,10 +99,19 @@ export function buildBackendSyncConfig(input: ZoomDriveSyncProxyConfigInput): Re
   const zoomClientId = cleanString(env.ZOOM_CLIENT_ID);
   const zoomClientSecret = cleanString(env.ZOOM_CLIENT_SECRET);
   const zoomAccountId = cleanString(env.ZOOM_ACCOUNT_ID);
+  const googleServiceAccountEmail = cleanString(env.GOOGLE_SERVICE_ACCOUNT_EMAIL);
+  const googlePrivateKey = cleanString(env.GOOGLE_PRIVATE_KEY);
+  const googleServiceAccountSubject = cleanString(env.GOOGLE_SERVICE_ACCOUNT_SUBJECT);
 
   if (!zoomClientId || !zoomClientSecret || !zoomAccountId) {
     throw new Error(
       "Faltan credenciales Zoom en variables del servidor web (ZOOM_CLIENT_ID, ZOOM_CLIENT_SECRET, ZOOM_ACCOUNT_ID)."
+    );
+  }
+
+  if (!googleServiceAccountEmail || !googlePrivateKey) {
+    throw new Error(
+      "Faltan credenciales Google Service Account en variables del servidor web (GOOGLE_SERVICE_ACCOUNT_EMAIL, GOOGLE_PRIVATE_KEY)."
     );
   }
 
@@ -114,9 +123,9 @@ export function buildBackendSyncConfig(input: ZoomDriveSyncProxyConfigInput): Re
     ZOOM_GROUP_ID: cleanString(input.zoomGroupId) || cleanString(env.ZOOM_GROUP_ID),
     TIMEZONE: cleanString(env.TIMEZONE) || "America/Montevideo",
     DRIVE_DESTINATION_ID: cleanString(input.driveDestinationId) || cleanString(env.DRIVE_DESTINATION_ID),
-    GOOGLE_SERVICE_ACCOUNT_EMAIL: cleanString(env.GOOGLE_SERVICE_ACCOUNT_EMAIL),
-    GOOGLE_PRIVATE_KEY: cleanString(env.GOOGLE_PRIVATE_KEY),
-    GOOGLE_SERVICE_ACCOUNT_SUBJECT: cleanString(env.GOOGLE_SERVICE_ACCOUNT_SUBJECT)
+    GOOGLE_SERVICE_ACCOUNT_EMAIL: googleServiceAccountEmail,
+    GOOGLE_PRIVATE_KEY: googlePrivateKey,
+    GOOGLE_SERVICE_ACCOUNT_SUBJECT: googleServiceAccountSubject
   };
 
   const compact: Record<string, unknown> = {};
