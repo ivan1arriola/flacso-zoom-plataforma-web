@@ -19,6 +19,15 @@ export type StoredDriveRecording = {
   size: number | null;
 };
 
+export type DriveDestinationPreview = {
+  id: string;
+  name: string;
+  mimeType: string;
+  webViewLink: string;
+  accessible: boolean;
+  error?: string;
+};
+
 function buildGoogleJwtAuth(
   scopes: string[] = DRIVE_READONLY_SCOPES,
   options?: { useDelegatedSubject?: boolean }
@@ -59,6 +68,71 @@ function toStoredDriveRecording(value: Record<string, unknown>): StoredDriveReco
     modifiedTime: typeof value.modifiedTime === "string" ? value.modifiedTime : "",
     size: Number.isFinite(parsedSize) ? parsedSize : null
   };
+}
+
+function toDriveDestinationPreview(value: Record<string, unknown>): DriveDestinationPreview {
+  return {
+    id: typeof value.id === "string" ? value.id : "",
+    name: typeof value.name === "string" ? value.name : "",
+    mimeType: typeof value.mimeType === "string" ? value.mimeType : "",
+    webViewLink: typeof value.webViewLink === "string" ? value.webViewLink : "",
+    accessible: true
+  };
+}
+
+export async function resolveDriveDestinationPreview(): Promise<DriveDestinationPreview> {
+  const folderId = (env.DRIVE_DESTINATION_ID || "").trim();
+  if (!folderId) {
+    return {
+      id: "",
+      name: "",
+      mimeType: "",
+      webViewLink: "",
+      accessible: false,
+      error: "DRIVE_DESTINATION_ID no configurado en servidor."
+    };
+  }
+
+  try {
+    const auth = buildGoogleJwtAuth();
+    await authorizeJwt(auth);
+    const drive = google.drive({ version: "v3", auth });
+    const response = await drive.files.get({
+      fileId: folderId,
+      fields: "id,name,mimeType,webViewLink",
+      supportsAllDrives: true
+    });
+
+    const raw = response.data as unknown as Record<string, unknown>;
+    const preview = toDriveDestinationPreview(raw);
+    if (!preview.id) {
+      return {
+        id: folderId,
+        name: "",
+        mimeType: "",
+        webViewLink: "",
+        accessible: false,
+        error: "Google Drive no devolvio metadatos validos para la carpeta destino."
+      };
+    }
+    if (preview.id !== folderId) {
+      return {
+        ...preview,
+        accessible: false,
+        error: "Google Drive devolvio un ID distinto al configurado."
+      };
+    }
+    return preview;
+  } catch (error) {
+    return {
+      id: folderId,
+      name: "",
+      mimeType: "",
+      webViewLink: "",
+      accessible: false,
+      error: error instanceof Error ? error.message : "No se pudo leer la carpeta destino en Drive."
+    };
+  }
 }
 
 export async function listStoredRecordings(params: {

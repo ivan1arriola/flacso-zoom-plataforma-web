@@ -115,7 +115,10 @@ export function SpaTabZoomDriveSync() {
   const [isLoadingRecordings, setIsLoadingRecordings] = useState(false);
   const [recordingsNextPageToken, setRecordingsNextPageToken] = useState<string | undefined>(undefined);
   const [recordingsFolderId, setRecordingsFolderId] = useState("");
-  const lockedDriveDestinationId = boot?.defaults.driveDestinationId?.trim() || "";
+  const driveDestinationPreview = boot?.driveDestinationPreview;
+  const lockedDriveDestinationId =
+    driveDestinationPreview?.id?.trim() || boot?.defaults.driveDestinationId?.trim() || "";
+  const lockedDriveDestinationName = driveDestinationPreview?.name?.trim() || "";
 
   useEffect(() => {
     void initialize();
@@ -313,6 +316,7 @@ export function SpaTabZoomDriveSync() {
               <Chip label={`Grupos cargados: ${zoomGroups.length}`} />
               <Chip label={`Google SA en Vercel: ${boot?.zoomConfig.hasGoogleServiceAccountEmail && boot?.zoomConfig.hasGooglePrivateKey ? "lista" : "incompleta"}`} />
               <Chip label={`API key backend: ${boot?.zoomConfig.hasSyncApiKey ? "lista" : "incompleta"}`} />
+              <Chip label={`Carpeta destino: ${lockedDriveDestinationName || lockedDriveDestinationId || "-"}`} />
             </Stack>
             <Box
               sx={{
@@ -367,7 +371,25 @@ export function SpaTabZoomDriveSync() {
                 disabled
                 helperText="Destino bloqueado por configuracion del servidor. Para cambiarlo se actualiza DRIVE_DESTINATION_ID en variables del entorno."
               />
+              <TextField
+                label="DRIVE_DESTINATION_NAME"
+                value={lockedDriveDestinationName || "(sin nombre disponible)"}
+                disabled
+                helperText={
+                  driveDestinationPreview?.accessible
+                    ? "Nombre validado leyendo metadatos reales desde Google Drive."
+                    : `No se pudo validar en Drive: ${driveDestinationPreview?.error || "sin acceso"}`
+                }
+              />
             </Box>
+            {driveDestinationPreview?.webViewLink ? (
+              <Typography variant="caption" color="text.secondary">
+                Carpeta destino:{" "}
+                <a href={driveDestinationPreview.webViewLink} target="_blank" rel="noreferrer">
+                  abrir en Google Drive
+                </a>
+              </Typography>
+            ) : null}
 
             <Stack direction={{ xs: "column", sm: "row" }} spacing={1}>
               <Button
@@ -540,7 +562,7 @@ export function SpaTabZoomDriveSync() {
               </Typography>
               <Chip
                 variant="outlined"
-                label={`Destino: ${recordingsFolderId || lockedDriveDestinationId || "-"}`}
+                label={`Destino: ${lockedDriveDestinationName || recordingsFolderId || lockedDriveDestinationId || "-"}`}
               />
               <Chip variant="outlined" label={`Items: ${storedRecordings.length}`} />
             </Stack>

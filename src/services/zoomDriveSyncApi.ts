@@ -20,6 +20,14 @@ export type ZoomDriveSyncBootstrapResponse = {
     zoomGroupId: string;
     driveDestinationId: string;
   };
+  driveDestinationPreview: {
+    id: string;
+    name: string;
+    mimeType: string;
+    webViewLink: string;
+    accessible: boolean;
+    error?: string;
+  };
   zoomConfig: {
     usesServerVariables: boolean;
     zoomApiBase: string;

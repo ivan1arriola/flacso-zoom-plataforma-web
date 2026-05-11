@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { env } from "@/src/lib/env";
+import { resolveDriveDestinationPreview } from "@/src/lib/google-drive.client";
 import { requireAdminForZoomDriveSync, resolveZoomDriveSyncApiBaseUrl } from "../_utils";
 
 export const runtime = "nodejs";
@@ -10,6 +11,8 @@ export async function GET() {
     return NextResponse.json(access.body, { status: access.status });
   }
 
+  const driveDestinationPreview = await resolveDriveDestinationPreview();
+
   return NextResponse.json({
     defaults: {
       apiBaseUrl: resolveZoomDriveSyncApiBaseUrl(),
@@ -17,6 +20,7 @@ export async function GET() {
       zoomGroupId: env.ZOOM_GROUP_ID ?? "",
       driveDestinationId: env.DRIVE_DESTINATION_ID ?? ""
     },
+    driveDestinationPreview,
     zoomConfig: {
       usesServerVariables: true,
       zoomApiBase: env.ZOOM_API_BASE,
