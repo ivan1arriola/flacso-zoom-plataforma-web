@@ -19,10 +19,12 @@ import {
   loadZoomGroups,
   runZoomDriveSyncWithProgress,
   type StoredDriveRecording,
+  type ZoomDriveSyncApiErrorDetails,
   type ZoomDriveSyncBootstrapResponse,
   type ZoomDriveSyncConfigInput,
   type ZoomDriveSyncProgressEvent,
   type ZoomDriveSyncRunResponse,
+  type ZoomDriveSyncValidationCheck,
   validateZoomDriveSyncConfig,
   type ZoomDriveSyncValidationResponse,
   type ZoomGroup
@@ -109,6 +111,7 @@ export function SpaTabZoomDriveSync() {
   const [statusError, setStatusError] = useState("");
   const [statusMessage, setStatusMessage] = useState("");
   const [validation, setValidation] = useState<ZoomDriveSyncValidationResponse | null>(null);
+  const [validationErrorDetails, setValidationErrorDetails] = useState<ZoomDriveSyncApiErrorDetails | null>(null);
   const [syncResult, setSyncResult] = useState<ZoomDriveSyncRunResponse | null>(null);
   const [progressEvents, setProgressEvents] = useState<ZoomDriveSyncProgressEvent[]>([]);
   const [storedRecordings, setStoredRecordings] = useState<StoredDriveRecording[]>([]);
@@ -183,6 +186,10 @@ export function SpaTabZoomDriveSync() {
 
   const configPayload = useMemo(() => toPayloadConfig(form), [form]);
   const latestProgress = progressEvents.length > 0 ? progressEvents[progressEvents.length - 1] : null;
+  const validationChecks: ZoomDriveSyncValidationCheck[] =
+    validation?.checks || validationErrorDetails?.checks || [];
+  const validationSettingsPreview =
+    validation?.settingsPreview || validationErrorDetails?.settingsPreview;
 
   async function loadSavedRecordings(append = false) {
     setStatusError("");
@@ -216,15 +223,18 @@ export function SpaTabZoomDriveSync() {
     setStatusError("");
     setStatusMessage("");
     setValidation(null);
+    setValidationErrorDetails(null);
     setIsValidating(true);
 
     try {
       const response = await validateZoomDriveSyncConfig(configPayload);
       if (!response.success) {
+        setValidationErrorDetails(response.errorDetails ?? null);
         setStatusError(response.error ?? "No se pudo validar la configuracion.");
         return;
       }
       setValidation(response.data ?? null);
+      setValidationErrorDetails(null);
       setStatusMessage(response.data?.message ?? "Configuracion valida.");
     } finally {
       setIsValidating(false);
@@ -420,6 +430,7 @@ export function SpaTabZoomDriveSync() {
                   setStatusError("");
                   setStatusMessage("");
                   setValidation(null);
+                  setValidationErrorDetails(null);
                   setSyncResult(null);
                   setProgressEvents([]);
                   setStoredRecordings([]);
@@ -444,7 +455,11 @@ export function SpaTabZoomDriveSync() {
         </CardContent>
       </Card>
 
-      {statusError ? <Alert severity="error">{statusError}</Alert> : null}
+      {statusError ? (
+        <Alert severity="error" sx={{ whiteSpace: "pre-line" }}>
+          {statusError}
+        </Alert>
+      ) : null}
       {statusMessage ? <Alert severity="success">{statusMessage}</Alert> : null}
 
       {isSyncing || progressEvents.length > 0 ? (
@@ -490,24 +505,69 @@ export function SpaTabZoomDriveSync() {
         </Card>
       ) : null}
 
-      {validation?.settingsPreview ? (
+      {validation || validationErrorDetails ? (
         <Card variant="outlined" sx={{ borderRadius: 3 }}>
           <CardContent>
             <Typography variant="h6" sx={{ fontWeight: 700, mb: 1 }}>
               Validacion
             </Typography>
-            <Stack direction="row" spacing={1} useFlexGap flexWrap="wrap">
-              <Chip label={`Scope: ${validation.settingsPreview.scope || "-"}`} />
-              <Chip label={`Timezone: ${validation.settingsPreview.timezone || "-"}`} />
-              <Chip label={`Drive: ${validation.settingsPreview.driveDestinationId || "-"}`} />
-              {typeof validation.settingsPreview.parallelWorkers === "number" ? (
-                <Chip label={`Workers backend: ${validation.settingsPreview.parallelWorkers}`} />
+            <Stack spacing={1.2}>
+              {validationChecks.map((check) => (
+                <Alert key={check.id} severity={check.ok ? "success" : "error"}>
+                  <Typography variant="subtitle2" sx={{ fontWeight: 700 }}>
+                    {check.label}
+                  </Typography>
+                  <Typography variant="body2">{check.message}</Typography>
+                  {check.hint ? (
+                    <Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: 0.3 }}>
+                      Sugerencia: {check.hint}
+                    </Typography>
+                  ) : null}
+                  {check.details ? (
+                    <Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: 0.3 }}>
+                      Detalle tecnico: {check.details}
+                    </Typography>
+                  ) : null}
+                </Alert>
+              ))}
+
+              {validationErrorDetails?.hints && validationErrorDetails.hints.length > 0 ? (
+                <Alert severity="info">
+                  <Typography variant="subtitle2" sx={{ fontWeight: 700 }}>
+                    Recomendaciones
+                  </Typography>
+                  {validationErrorDetails.hints.map((hint, index) => (
+                    <Typography key={`${hint}-${index}`} variant="body2">
+                      {index + 1}. {hint}
+                    </Typography>
+                  ))}
+                </Alert>
               ) : null}
-              {typeof validation.settingsPreview.mediaWorkers === "number" ? (
-                <Chip label={`Media workers backend: ${validation.settingsPreview.mediaWorkers}`} />
+
+              {validationErrorDetails?.details ? (
+                <Alert severity="warning">
+                  <Typography variant="subtitle2" sx={{ fontWeight: 700 }}>
+                    Detalle tecnico extendido
+                  </Typography>
+                  <Typography variant="body2">{validationErrorDetails.details}</Typography>
+                </Alert>
               ) : null}
-              {typeof validation.settingsPreview.deleteFromZoom === "boolean" ? (
-                <Chip label={`Eliminar en Zoom (backend): ${validation.settingsPreview.deleteFromZoom ? "si" : "no"}`} />
+
+              {validationSettingsPreview ? (
+                <Stack direction="row" spacing={1} useFlexGap flexWrap="wrap">
+                  <Chip label={`Scope: ${validationSettingsPreview.scope || "-"}`} />
+                  <Chip label={`Timezone: ${validationSettingsPreview.timezone || "-"}`} />
+                  <Chip label={`Drive: ${validationSettingsPreview.driveDestinationId || "-"}`} />
+                  {typeof validationSettingsPreview.parallelWorkers === "number" ? (
+                    <Chip label={`Workers backend: ${validationSettingsPreview.parallelWorkers}`} />
+                  ) : null}
+                  {typeof validationSettingsPreview.mediaWorkers === "number" ? (
+                    <Chip label={`Media workers backend: ${validationSettingsPreview.mediaWorkers}`} />
+                  ) : null}
+                  {typeof validationSettingsPreview.deleteFromZoom === "boolean" ? (
+                    <Chip label={`Eliminar en Zoom (backend): ${validationSettingsPreview.deleteFromZoom ? "si" : "no"}`} />
+                  ) : null}
+                </Stack>
               ) : null}
             </Stack>
           </CardContent>

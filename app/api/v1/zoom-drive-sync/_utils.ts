@@ -18,6 +18,53 @@ type ProxyRequestBody = {
   config?: ZoomDriveSyncProxyConfigInput;
 };
 
+type ProxyBackendErrorPayload = {
+  error: string;
+  ok?: boolean;
+  settingsPreview?: unknown;
+  checks?: unknown[];
+  hints?: string[];
+  details?: string;
+};
+
+function asText(value: unknown): string {
+  return typeof value === "string" ? value.trim() : "";
+}
+
+function normalizeProxyErrorPayload(payload: Record<string, unknown>): ProxyBackendErrorPayload {
+  const detail = payload.detail;
+  const detailRecord = detail && typeof detail === "object" ? (detail as Record<string, unknown>) : null;
+  const source = detailRecord ?? payload;
+  const errorMessage =
+    asText(source.message) ||
+    asText(source.error) ||
+    asText(payload.detail) ||
+    asText(payload.error) ||
+    asText(payload.message) ||
+    "No se pudo completar la solicitud al backend de sincronizacion.";
+
+  const normalized: ProxyBackendErrorPayload = { error: errorMessage };
+
+  if (typeof source.ok === "boolean") {
+    normalized.ok = source.ok;
+  }
+  if (source.settingsPreview && typeof source.settingsPreview === "object") {
+    normalized.settingsPreview = source.settingsPreview;
+  }
+  if (Array.isArray(source.checks)) {
+    normalized.checks = source.checks;
+  }
+  if (Array.isArray(source.hints)) {
+    normalized.hints = source.hints;
+  }
+  const details = asText(source.details);
+  if (details) {
+    normalized.details = details;
+  }
+
+  return normalized;
+}
+
 function normalizeUrl(value: string): string {
   return value.trim().replace(/\/+$/, "");
 }
@@ -167,12 +214,7 @@ export async function proxyToSyncBackend<T>(
       return {
         ok: false,
         status: response.status,
-        json: {
-          error:
-            (typeof payload.detail === "string" && payload.detail) ||
-            (typeof payload.error === "string" && payload.error) ||
-            "No se pudo completar la solicitud al backend de sincronizacion."
-        }
+        json: normalizeProxyErrorPayload(payload)
       };
     }
     return {

@@ -51,6 +51,16 @@ export type ZoomDriveSyncValidationResponse = {
     mediaWorkers?: number;
     deleteFromZoom?: boolean;
   };
+  checks?: ZoomDriveSyncValidationCheck[];
+};
+
+export type ZoomDriveSyncValidationCheck = {
+  id: string;
+  label: string;
+  ok: boolean;
+  message: string;
+  hint?: string;
+  details?: string;
 };
 
 export type ZoomDriveSyncRunResponse = {
@@ -102,6 +112,14 @@ export type ZoomDriveSyncApiResponse<T> = {
   success: boolean;
   data?: T;
   error?: string;
+  errorDetails?: ZoomDriveSyncApiErrorDetails;
+};
+
+export type ZoomDriveSyncApiErrorDetails = {
+  checks?: ZoomDriveSyncValidationCheck[];
+  settingsPreview?: ZoomDriveSyncValidationResponse["settingsPreview"];
+  hints?: string[];
+  details?: string;
 };
 
 async function readJson<T>(response: Response): Promise<T | null> {
@@ -112,18 +130,106 @@ async function readJson<T>(response: Response): Promise<T | null> {
   }
 }
 
-async function readError(response: Response): Promise<string> {
-  const payload = await readJson<{ error?: string; detail?: string; message?: string }>(response);
-  return payload?.error || payload?.detail || payload?.message || "No se pudo completar la solicitud.";
+function toStringValue(value: unknown): string {
+  return typeof value === "string" ? value.trim() : "";
+}
+
+function toStringArray(value: unknown): string[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const parsed = value.map((item) => toStringValue(item)).filter(Boolean);
+  return parsed.length > 0 ? parsed : undefined;
+}
+
+function normalizeValidationChecks(value: unknown): ZoomDriveSyncValidationCheck[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const checks = value
+    .map((item): ZoomDriveSyncValidationCheck | null => {
+      if (!item || typeof item !== "object") return null;
+      const record = item as Record<string, unknown>;
+      const id = toStringValue(record.id);
+      const label = toStringValue(record.label);
+      const message = toStringValue(record.message);
+      if (!id || !label || !message) return null;
+      return {
+        id,
+        label,
+        message,
+        ok: Boolean(record.ok),
+        hint: toStringValue(record.hint) || undefined,
+        details: toStringValue(record.details) || undefined
+      };
+    })
+    .filter((item): item is ZoomDriveSyncValidationCheck => Boolean(item));
+  return checks.length > 0 ? checks : undefined;
+}
+
+function normalizeSettingsPreview(value: unknown): ZoomDriveSyncValidationResponse["settingsPreview"] | undefined {
+  if (!value || typeof value !== "object") return undefined;
+  return value as ZoomDriveSyncValidationResponse["settingsPreview"];
+}
+
+function buildErrorPayload(payload: Record<string, unknown> | null): {
+  message: string;
+  details?: ZoomDriveSyncApiErrorDetails;
+} {
+  if (!payload) {
+    return { message: "No se pudo completar la solicitud." };
+  }
+
+  const detailRecord =
+    payload.detail && typeof payload.detail === "object"
+      ? (payload.detail as Record<string, unknown>)
+      : null;
+  const source = detailRecord ?? payload;
+
+  const message =
+    toStringValue(source.error) ||
+    toStringValue(source.message) ||
+    toStringValue(payload.error) ||
+    toStringValue(payload.detail) ||
+    toStringValue(payload.message) ||
+    "No se pudo completar la solicitud.";
+
+  const checks =
+    normalizeValidationChecks(source.checks) ||
+    normalizeValidationChecks(payload.checks);
+  const settingsPreview =
+    normalizeSettingsPreview(source.settingsPreview) ||
+    normalizeSettingsPreview(payload.settingsPreview);
+  const hints = toStringArray(source.hints) || toStringArray(payload.hints);
+  const details = toStringValue(source.details) || toStringValue(payload.details) || undefined;
+
+  const hasDetailData = Boolean(checks || settingsPreview || hints || details);
+  return {
+    message,
+    details: hasDetailData
+      ? {
+          checks,
+          settingsPreview,
+          hints,
+          details
+        }
+      : undefined
+  };
+}
+
+async function readError(response: Response): Promise<{
+  message: string;
+  details?: ZoomDriveSyncApiErrorDetails;
+}> {
+  const payload = await readJson<Record<string, unknown>>(response);
+  return buildErrorPayload(payload);
 }
 
 export async function loadZoomDriveSyncBootstrap(): Promise<ZoomDriveSyncApiResponse<ZoomDriveSyncBootstrapResponse>> {
   try {
     const response = await fetch("/api/v1/zoom-drive-sync/bootstrap", { cache: "no-store" });
     if (!response.ok) {
+      const errorPayload = await readError(response);
       return {
         success: false,
-        error: await readError(response)
+        error: errorPayload.message,
+        errorDetails: errorPayload.details
       };
     }
     return {
@@ -142,9 +248,11 @@ export async function loadZoomGroups(): Promise<ZoomDriveSyncApiResponse<ZoomGro
   try {
     const response = await fetch("/api/v1/zoom/grupos", { cache: "no-store" });
     if (!response.ok) {
+      const errorPayload = await readError(response);
       return {
         success: false,
-        error: await readError(response)
+        error: errorPayload.message,
+        errorDetails: errorPayload.details
       };
     }
     return {
@@ -173,9 +281,11 @@ export async function loadStoredDriveRecordings(params: {
       })
     });
     if (!response.ok) {
+      const errorPayload = await readError(response);
       return {
         success: false,
-        error: await readError(response)
+        error: errorPayload.message,
+        errorDetails: errorPayload.details
       };
     }
     return {
@@ -205,9 +315,11 @@ async function postToProxyRoute<T>(
       body: JSON.stringify(payload)
     });
     if (!response.ok) {
+      const errorPayload = await readError(response);
       return {
         success: false,
-        error: await readError(response)
+        error: errorPayload.message,
+        errorDetails: errorPayload.details
       };
     }
     return {
@@ -281,9 +393,11 @@ export async function runZoomDriveSyncWithProgress(
     });
 
     if (!response.ok) {
+      const errorPayload = await readError(response);
       return {
         success: false,
-        error: await readError(response)
+        error: errorPayload.message,
+        errorDetails: errorPayload.details
       };
     }
 
