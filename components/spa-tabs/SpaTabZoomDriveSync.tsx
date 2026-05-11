@@ -20,7 +20,6 @@ import {
   runZoomDriveSyncWithProgress,
   type StoredDriveRecording,
   type ZoomDriveSyncBootstrapResponse,
-  type ZoomDriveSyncConnection,
   type ZoomDriveSyncConfigInput,
   type ZoomDriveSyncProgressEvent,
   type ZoomDriveSyncRunResponse,
@@ -30,47 +29,23 @@ import {
 } from "@/src/services/zoomDriveSyncApi";
 
 type ZoomDriveSyncForm = {
-  apiBaseUrl: string;
-  apiKey: string;
   zoomGroupId: string;
-  driveDestinationId: string;
 };
 
-type SyncBackendTarget = "LOCAL" | "PROD" | "CUSTOM";
-
-const SYNC_BACKEND_LOCAL_URL = "http://localhost:8000";
-const SYNC_BACKEND_PROD_URL = "https://zoom-drive-sync-cbty.onrender.com";
 
 const defaultForm: ZoomDriveSyncForm = {
-  apiBaseUrl: SYNC_BACKEND_LOCAL_URL,
-  apiKey: "",
-  zoomGroupId: "",
-  driveDestinationId: ""
+  zoomGroupId: ""
 };
-
-function normalizeUrl(value: string): string {
-  return value.trim().replace(/\/+$/, "");
-}
-
-function detectSyncBackendTarget(url: string): SyncBackendTarget {
-  const normalized = normalizeUrl(url);
-  if (normalized === normalizeUrl(SYNC_BACKEND_LOCAL_URL)) return "LOCAL";
-  if (normalized === normalizeUrl(SYNC_BACKEND_PROD_URL)) return "PROD";
-  return "CUSTOM";
-}
 
 function formFromBootstrap(payload: ZoomDriveSyncBootstrapResponse): Partial<ZoomDriveSyncForm> {
   return {
-    apiBaseUrl: payload.defaults.apiBaseUrl || defaultForm.apiBaseUrl,
-    zoomGroupId: payload.defaults.zoomGroupId || "",
-    driveDestinationId: payload.defaults.driveDestinationId || ""
+    zoomGroupId: payload.defaults.zoomGroupId || ""
   };
 }
 
 function toPayloadConfig(form: ZoomDriveSyncForm): ZoomDriveSyncConfigInput {
   return {
-    zoomGroupId: form.zoomGroupId.trim(),
-    driveDestinationId: form.driveDestinationId.trim()
+    zoomGroupId: form.zoomGroupId.trim()
   };
 }
 
@@ -126,12 +101,8 @@ function recordingTypeLabel(item: StoredDriveRecording): string {
 
 export function SpaTabZoomDriveSync() {
   const [form, setForm] = useState<ZoomDriveSyncForm>(defaultForm);
-  const [syncBackendTarget, setSyncBackendTarget] = useState<SyncBackendTarget>(
-    detectSyncBackendTarget(defaultForm.apiBaseUrl)
-  );
   const [boot, setBoot] = useState<ZoomDriveSyncBootstrapResponse | null>(null);
   const [zoomGroups, setZoomGroups] = useState<ZoomGroup[]>([]);
-  const [isLoadingDefaults, setIsLoadingDefaults] = useState(false);
   const [isLoadingGroups, setIsLoadingGroups] = useState(false);
   const [isValidating, setIsValidating] = useState(false);
   const [isSyncing, setIsSyncing] = useState(false);
@@ -144,6 +115,7 @@ export function SpaTabZoomDriveSync() {
   const [isLoadingRecordings, setIsLoadingRecordings] = useState(false);
   const [recordingsNextPageToken, setRecordingsNextPageToken] = useState<string | undefined>(undefined);
   const [recordingsFolderId, setRecordingsFolderId] = useState("");
+  const lockedDriveDestinationId = boot?.defaults.driveDestinationId?.trim() || "";
 
   useEffect(() => {
     void initialize();
@@ -151,7 +123,6 @@ export function SpaTabZoomDriveSync() {
 
   async function initialize() {
     setStatusError("");
-    setIsLoadingDefaults(true);
     setIsLoadingGroups(true);
     try {
       const [bootstrapRes, groupsRes] = await Promise.all([
@@ -161,9 +132,7 @@ export function SpaTabZoomDriveSync() {
 
       const bootstrapData = bootstrapRes.data;
       if (bootstrapRes.success && bootstrapData) {
-        const defaultApiBaseUrl = bootstrapData.defaults.apiBaseUrl || defaultForm.apiBaseUrl;
         setBoot(bootstrapData);
-        setSyncBackendTarget(detectSyncBackendTarget(defaultApiBaseUrl));
         setForm((current) => ({
           ...current,
           ...formFromBootstrap(bootstrapData)
@@ -191,7 +160,6 @@ export function SpaTabZoomDriveSync() {
         );
       }
     } finally {
-      setIsLoadingDefaults(false);
       setIsLoadingGroups(false);
     }
   }
@@ -210,13 +178,6 @@ export function SpaTabZoomDriveSync() {
     setIsLoadingGroups(false);
   }
 
-  const connection = useMemo<ZoomDriveSyncConnection>(
-    () => ({
-      apiBaseUrl: form.apiBaseUrl,
-      apiKey: form.apiKey
-    }),
-    [form.apiBaseUrl, form.apiKey]
-  );
   const configPayload = useMemo(() => toPayloadConfig(form), [form]);
   const latestProgress = progressEvents.length > 0 ? progressEvents[progressEvents.length - 1] : null;
 
@@ -224,9 +185,7 @@ export function SpaTabZoomDriveSync() {
     setStatusError("");
     setIsLoadingRecordings(true);
     try {
-      const destinationId = form.driveDestinationId.trim();
       const response = await loadStoredDriveRecordings({
-        driveDestinationId: destinationId || undefined,
         pageToken: append ? recordingsNextPageToken : undefined,
         pageSize: 50
       });
@@ -257,7 +216,7 @@ export function SpaTabZoomDriveSync() {
     setIsValidating(true);
 
     try {
-      const response = await validateZoomDriveSyncConfig(connection, configPayload);
+      const response = await validateZoomDriveSyncConfig(configPayload);
       if (!response.success) {
         setStatusError(response.error ?? "No se pudo validar la configuracion.");
         return;
@@ -277,7 +236,7 @@ export function SpaTabZoomDriveSync() {
     setIsSyncing(true);
 
     try {
-      const response = await runZoomDriveSyncWithProgress(connection, configPayload, {
+      const response = await runZoomDriveSyncWithProgress(configPayload, {
         onStarted: (message) => {
           setStatusMessage(message);
         },
@@ -309,10 +268,10 @@ export function SpaTabZoomDriveSync() {
               Descargar grabaciones a Google Drive
             </Typography>
             <Typography variant="body2" color="text.secondary">
-              Google Service Account se resuelve en backend. Aqui solo eliges el destino en Drive y el grupo Zoom.
+              Google Service Account, backend sync, API key y carpeta destino se resuelven en backend.
             </Typography>
             <Typography variant="caption" color="text.secondary">
-              Las opciones de ejecucion (workers, borrado en Zoom, etc.) se gestionan en el backend.
+              Desde esta vista solo se selecciona el grupo Zoom para acotar alcance.
             </Typography>
           </Stack>
         </CardContent>
@@ -332,46 +291,16 @@ export function SpaTabZoomDriveSync() {
               }}
             >
               <TextField
-                select
-                label="Entorno backend sync"
-                value={syncBackendTarget}
-                onChange={(event) => {
-                  const nextTarget = String(event.target.value) as SyncBackendTarget;
-                  setSyncBackendTarget(nextTarget);
-                  if (nextTarget === "LOCAL") {
-                    setForm((current) => ({ ...current, apiBaseUrl: SYNC_BACKEND_LOCAL_URL }));
-                    return;
-                  }
-                  if (nextTarget === "PROD") {
-                    setForm((current) => ({ ...current, apiBaseUrl: SYNC_BACKEND_PROD_URL }));
-                  }
-                }}
-                helperText="Cambia rapido entre tu backend local y el de produccion."
-                disabled={isLoadingDefaults}
-              >
-                <MenuItem value="LOCAL">Localhost</MenuItem>
-                <MenuItem value="PROD">Produccion</MenuItem>
-                <MenuItem value="CUSTOM">Custom (manual)</MenuItem>
-              </TextField>
-              <TextField
-                label="URL backend sync"
-                value={form.apiBaseUrl}
-                onChange={(event) => {
-                  const nextUrl = event.target.value;
-                  setForm((current) => ({ ...current, apiBaseUrl: nextUrl }));
-                  setSyncBackendTarget(detectSyncBackendTarget(nextUrl));
-                }}
-                placeholder="https://sync.tu-dominio.com"
-                disabled={isLoadingDefaults}
+                label="Backend sync (automatico)"
+                value={boot?.defaults.apiBaseUrl || "-"}
+                disabled
+                helperText="Se resuelve automaticamente en servidor segun el entorno de ejecucion."
               />
               <TextField
-                label="API key (opcional)"
-                value={form.apiKey}
-                onChange={(event) =>
-                  setForm((current) => ({ ...current, apiKey: event.target.value }))
-                }
-                type="password"
-                disabled={isLoadingDefaults}
+                label="API key backend"
+                value={boot?.zoomConfig.hasSyncApiKey ? "Configurada en servidor" : "Falta configurar en servidor"}
+                disabled
+                helperText="No se edita desde esta pantalla."
               />
             </Box>
 
@@ -383,6 +312,7 @@ export function SpaTabZoomDriveSync() {
               <Chip label={`ZOOM_API_BASE: ${boot?.zoomConfig.zoomApiBase || "-"}`} />
               <Chip label={`Grupos cargados: ${zoomGroups.length}`} />
               <Chip label={`Google SA en Vercel: ${boot?.zoomConfig.hasGoogleServiceAccountEmail && boot?.zoomConfig.hasGooglePrivateKey ? "lista" : "incompleta"}`} />
+              <Chip label={`API key backend: ${boot?.zoomConfig.hasSyncApiKey ? "lista" : "incompleta"}`} />
             </Stack>
             <Box
               sx={{
@@ -433,11 +363,9 @@ export function SpaTabZoomDriveSync() {
             >
               <TextField
                 label="DRIVE_DESTINATION_ID"
-                value={form.driveDestinationId}
-                onChange={(event) =>
-                  setForm((current) => ({ ...current, driveDestinationId: event.target.value }))
-                }
-                helperText="Unico campo obligatorio editable para el destino en Drive."
+                value={lockedDriveDestinationId}
+                disabled
+                helperText="Destino bloqueado por configuracion del servidor. Para cambiarlo se actualiza DRIVE_DESTINATION_ID en variables del entorno."
               />
             </Box>
 
@@ -475,7 +403,6 @@ export function SpaTabZoomDriveSync() {
                   setStoredRecordings([]);
                   setRecordingsNextPageToken(undefined);
                   setRecordingsFolderId("");
-                  setSyncBackendTarget(detectSyncBackendTarget(boot ? formFromBootstrap(boot).apiBaseUrl ?? defaultForm.apiBaseUrl : defaultForm.apiBaseUrl));
                 }}
                 disabled={isValidating || isSyncing}
               >
@@ -613,7 +540,7 @@ export function SpaTabZoomDriveSync() {
               </Typography>
               <Chip
                 variant="outlined"
-                label={`Destino: ${recordingsFolderId || form.driveDestinationId || "-"}`}
+                label={`Destino: ${recordingsFolderId || lockedDriveDestinationId || "-"}`}
               />
               <Chip variant="outlined" label={`Items: ${storedRecordings.length}`} />
             </Stack>

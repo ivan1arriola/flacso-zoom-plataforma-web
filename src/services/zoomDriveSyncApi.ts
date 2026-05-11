@@ -1,11 +1,5 @@
-export type ZoomDriveSyncConnection = {
-  apiBaseUrl: string;
-  apiKey?: string;
-};
-
 export type ZoomDriveSyncConfigInput = {
   zoomGroupId?: string;
-  driveDestinationId?: string;
 };
 
 export type ZoomGroup = {
@@ -34,6 +28,7 @@ export type ZoomDriveSyncBootstrapResponse = {
     hasZoomAccountId: boolean;
     hasGoogleServiceAccountEmail: boolean;
     hasGooglePrivateKey: boolean;
+    hasSyncApiKey: boolean;
   };
 };
 
@@ -157,7 +152,6 @@ export async function loadZoomGroups(): Promise<ZoomDriveSyncApiResponse<ZoomGro
 }
 
 export async function loadStoredDriveRecordings(params: {
-  driveDestinationId?: string;
   pageToken?: string;
   pageSize?: number;
 }): Promise<ZoomDriveSyncApiResponse<StoredDriveRecordingsResponse>> {
@@ -165,7 +159,10 @@ export async function loadStoredDriveRecordings(params: {
     const response = await fetch("/api/v1/zoom-drive-sync/recordings", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(params)
+      body: JSON.stringify({
+        pageToken: params.pageToken,
+        pageSize: params.pageSize
+      })
     });
     if (!response.ok) {
       return {
@@ -186,7 +183,6 @@ export async function loadStoredDriveRecordings(params: {
 }
 
 type ProxyPayload = {
-  connection: ZoomDriveSyncConnection;
   config: ZoomDriveSyncConfigInput;
 };
 
@@ -219,22 +215,20 @@ async function postToProxyRoute<T>(
 }
 
 export async function validateZoomDriveSyncConfig(
-  connection: ZoomDriveSyncConnection,
   config: ZoomDriveSyncConfigInput
 ): Promise<ZoomDriveSyncApiResponse<ZoomDriveSyncValidationResponse>> {
   return postToProxyRoute<ZoomDriveSyncValidationResponse>(
     "/api/v1/zoom-drive-sync/validate",
-    { connection, config }
+    { config }
   );
 }
 
 export async function runZoomDriveSync(
-  connection: ZoomDriveSyncConnection,
   config: ZoomDriveSyncConfigInput
 ): Promise<ZoomDriveSyncApiResponse<ZoomDriveSyncRunResponse>> {
   return postToProxyRoute<ZoomDriveSyncRunResponse>(
     "/api/v1/zoom-drive-sync/sync",
-    { connection, config }
+    { config }
   );
 }
 
@@ -268,7 +262,6 @@ function readNdjsonLines(buffer: string): { lines: string[]; rest: string } {
 }
 
 export async function runZoomDriveSyncWithProgress(
-  connection: ZoomDriveSyncConnection,
   config: ZoomDriveSyncConfigInput,
   handlers: ZoomDriveSyncStreamHandlers = {}
 ): Promise<ZoomDriveSyncApiResponse<ZoomDriveSyncRunResponse>> {
@@ -276,7 +269,7 @@ export async function runZoomDriveSyncWithProgress(
     const response = await fetch("/api/v1/zoom-drive-sync/sync/stream", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ connection, config })
+      body: JSON.stringify({ config })
     });
 
     if (!response.ok) {

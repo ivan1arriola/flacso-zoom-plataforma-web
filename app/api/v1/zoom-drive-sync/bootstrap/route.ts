@@ -25,6 +25,7 @@ export async function GET() {
       hasZoomAccountId: Boolean(env.ZOOM_ACCOUNT_ID),
       hasGoogleServiceAccountEmail: Boolean(env.GOOGLE_SERVICE_ACCOUNT_EMAIL),
       hasGooglePrivateKey: Boolean(env.GOOGLE_PRIVATE_KEY),
+      hasSyncApiKey: Boolean(env.ZOOM_DRIVE_SYNC_API_KEY),
     }
   });
 }

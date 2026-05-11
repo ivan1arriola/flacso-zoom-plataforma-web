@@ -62,14 +62,13 @@ function toStoredDriveRecording(value: Record<string, unknown>): StoredDriveReco
 }
 
 export async function listStoredRecordings(params: {
-  driveDestinationId?: string;
   pageToken?: string;
   pageSize?: number;
 }): Promise<{ driveDestinationId: string; items: StoredDriveRecording[]; nextPageToken?: string }> {
-  const folderId = (params.driveDestinationId || env.DRIVE_DESTINATION_ID || "").trim();
+  const folderId = (env.DRIVE_DESTINATION_ID || "").trim();
   if (!folderId) {
     throw new Error(
-      "No se encontro DRIVE_DESTINATION_ID. Indicalo en la vista o define DRIVE_DESTINATION_ID en Vercel."
+      "No se encontro DRIVE_DESTINATION_ID. Debe definirse en variables del servidor."
     );
   }
 

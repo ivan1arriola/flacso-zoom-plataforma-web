@@ -3,6 +3,7 @@ import { getSessionUser } from "@/src/lib/api-auth";
 import { env } from "@/src/lib/env";
 
 const SYNC_BACKEND_PROD_URL = "https://zoom-drive-sync-cbty.onrender.com";
+const SYNC_BACKEND_LOCAL_URL = "http://localhost:8000";
 
 export type ZoomDriveSyncProxyConnection = {
   apiBaseUrl: string;
@@ -11,11 +12,9 @@ export type ZoomDriveSyncProxyConnection = {
 
 export type ZoomDriveSyncProxyConfigInput = {
   zoomGroupId?: string;
-  driveDestinationId?: string;
 };
 
 type ProxyRequestBody = {
-  connection?: Partial<ZoomDriveSyncProxyConnection>;
   config?: ZoomDriveSyncProxyConfigInput;
 };
 
@@ -33,24 +32,18 @@ function isLocalhostUrl(value: string): boolean {
   }
 }
 
-export function resolveZoomDriveSyncApiBaseUrl(preferred?: string): string {
-  const requested = normalizeUrl(preferred ?? "");
+export function resolveZoomDriveSyncApiBaseUrl(): string {
   const envDefault = normalizeUrl(env.ZOOM_DRIVE_SYNC_API_BASE_URL ?? "");
-  const fallback = requested || envDefault;
 
   if (env.NODE_ENV === "production") {
     const forcedProdUrl = normalizeUrl(SYNC_BACKEND_PROD_URL);
-    if (requested && requested !== forcedProdUrl) {
-      throw new Error(
-        `En produccion solo se permite ${forcedProdUrl} como backend de sincronizacion.`
-      );
-    }
-    if (isLocalhostUrl(fallback)) {
+    if (isLocalhostUrl(forcedProdUrl)) {
       throw new Error("No se permite localhost como backend de sincronizacion en produccion.");
     }
     return forcedProdUrl;
   }
 
+  const fallback = envDefault || normalizeUrl(SYNC_BACKEND_LOCAL_URL);
   if (!fallback) {
     throw new Error("Debes indicar la URL del backend de sincronizacion.");
   }
@@ -80,12 +73,17 @@ export async function parseProxyRequestBody(request: Request): Promise<{
     body = {};
   }
 
-  const apiBaseUrl = resolveZoomDriveSyncApiBaseUrl(body.connection?.apiBaseUrl);
-  const apiKey = body.connection?.apiKey?.trim() || env.ZOOM_DRIVE_SYNC_API_KEY?.trim() || "";
+  const apiBaseUrl = resolveZoomDriveSyncApiBaseUrl();
+  const apiKey = cleanString(env.ZOOM_DRIVE_SYNC_API_KEY);
+  if (!apiKey) {
+    throw new Error(
+      "Falta ZOOM_DRIVE_SYNC_API_KEY en variables del servidor web. Debe existir para autenticar contra el backend de sincronizacion."
+    );
+  }
   return {
     connection: {
       apiBaseUrl,
-      apiKey: apiKey || undefined
+      apiKey
     },
     config: body.config ?? {}
   };
@@ -99,6 +97,7 @@ export function buildBackendSyncConfig(input: ZoomDriveSyncProxyConfigInput): Re
   const zoomClientId = cleanString(env.ZOOM_CLIENT_ID);
   const zoomClientSecret = cleanString(env.ZOOM_CLIENT_SECRET);
   const zoomAccountId = cleanString(env.ZOOM_ACCOUNT_ID);
+  const driveDestinationId = cleanString(env.DRIVE_DESTINATION_ID);
   const googleServiceAccountEmail = cleanString(env.GOOGLE_SERVICE_ACCOUNT_EMAIL);
   const googlePrivateKey = cleanString(env.GOOGLE_PRIVATE_KEY);
   const googleServiceAccountSubject = cleanString(env.GOOGLE_SERVICE_ACCOUNT_SUBJECT);
@@ -115,6 +114,12 @@ export function buildBackendSyncConfig(input: ZoomDriveSyncProxyConfigInput): Re
     );
   }
 
+  if (!driveDestinationId) {
+    throw new Error(
+      "Falta DRIVE_DESTINATION_ID en variables del servidor web. El destino en Drive se administra solo desde configuracion del servidor."
+    );
+  }
+
   const config: Record<string, unknown> = {
     ZOOM_CLIENT_ID: zoomClientId,
     ZOOM_CLIENT_SECRET: zoomClientSecret,
@@ -122,7 +127,7 @@ export function buildBackendSyncConfig(input: ZoomDriveSyncProxyConfigInput): Re
     ZOOM_API_BASE: cleanString(env.ZOOM_API_BASE) || "https://api.zoom.us/v2",
     ZOOM_GROUP_ID: cleanString(input.zoomGroupId) || cleanString(env.ZOOM_GROUP_ID),
     TIMEZONE: cleanString(env.TIMEZONE) || "America/Montevideo",
-    DRIVE_DESTINATION_ID: cleanString(input.driveDestinationId) || cleanString(env.DRIVE_DESTINATION_ID),
+    DRIVE_DESTINATION_ID: driveDestinationId,
     GOOGLE_SERVICE_ACCOUNT_EMAIL: googleServiceAccountEmail,
     GOOGLE_PRIVATE_KEY: googlePrivateKey,
     GOOGLE_SERVICE_ACCOUNT_SUBJECT: googleServiceAccountSubject
