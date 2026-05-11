@@ -412,6 +412,10 @@ export async function runZoomDriveSyncWithProgress(
     const decoder = new TextDecoder();
     let buffer = "";
     let completedPayload: ZoomDriveSyncRunResponse | null = null;
+    let sawStartedEvent = false;
+    let sawProgressEvent = false;
+    let sawErrorEvent = false;
+    let streamLineCount = 0;
 
     while (true) {
       const { value, done } = await reader.read();
@@ -432,18 +436,22 @@ export async function runZoomDriveSyncWithProgress(
           payload = null;
         }
         if (!payload || typeof payload !== "object") continue;
+        streamLineCount += 1;
 
         if (payload.type === "started") {
+          sawStartedEvent = true;
           handlers.onStarted?.(payload.message || "Sincronizacion iniciada.");
           continue;
         }
 
         if (payload.type === "progress") {
+          sawProgressEvent = true;
           if (payload.event) handlers.onProgress?.(payload.event);
           continue;
         }
 
         if (payload.type === "error") {
+          sawErrorEvent = true;
           return {
             success: false,
             error: payload.message || payload.error || "Error durante la sincronizacion."
@@ -467,7 +475,9 @@ export async function runZoomDriveSyncWithProgress(
           payload = null;
         }
         if (!payload || typeof payload !== "object") continue;
+        streamLineCount += 1;
         if (payload.type === "error") {
+          sawErrorEvent = true;
           return {
             success: false,
             error: payload.message || payload.error || "Error durante la sincronizacion."
@@ -480,9 +490,13 @@ export async function runZoomDriveSyncWithProgress(
     }
 
     if (!completedPayload) {
+      const likelyTimeout =
+        !sawErrorEvent && (sawStartedEvent || sawProgressEvent || streamLineCount > 0);
       return {
         success: false,
-        error: "La sincronizacion termino sin respuesta final."
+        error: likelyTimeout
+          ? "La sincronizacion fue interrumpida antes del cierre (posible timeout del proxy en Vercel). Intenta de nuevo con un alcance mas acotado o divide la ejecucion en tandas."
+          : "La sincronizacion termino sin respuesta final."
       };
     }
 
