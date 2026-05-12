@@ -10,6 +10,16 @@ function buildDisplayName(firstName?: string | null, lastName?: string | null): 
   return name || undefined;
 }
 
+function resolveRequestOrigin(request: Request): string | undefined {
+  const originHeader = request.headers.get("origin");
+  if (originHeader) return originHeader;
+  try {
+    return new URL(request.url).origin;
+  } catch {
+    return undefined;
+  }
+}
+
 export async function POST(request: Request) {
   if (!(await isAdminAuthorized())) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
@@ -20,7 +30,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const origin = request.headers.get("origin") ?? undefined;
+  const origin = resolveRequestOrigin(request);
 
   try {
     const result = await requestUserActivationLink({

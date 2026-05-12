@@ -53,6 +53,16 @@ function buildDisplayName(firstName?: string | null, lastName?: string | null): 
   return name || undefined;
 }
 
+function resolveRequestOrigin(request: Request): string | undefined {
+  const originHeader = request.headers.get("origin");
+  if (originHeader) return originHeader;
+  try {
+    return new URL(request.url).origin;
+  } catch {
+    return undefined;
+  }
+}
+
 function buildUserAccessEmails(input: { email: string; emailAliases: Array<{ email: string }> }): string[] {
   return Array.from(
     new Set([input.email.trim().toLowerCase(), ...input.emailAliases.map((item) => item.email.trim().toLowerCase())])
@@ -190,7 +200,7 @@ export async function POST(request: Request) {
   });
   await ensureAssistantProfileForRole(user.id, user.role);
 
-  const origin = request.headers.get("origin") ?? undefined;
+  const origin = resolveRequestOrigin(request);
   const invitedBy =
     buildDisplayName(adminUser?.firstName, adminUser?.lastName) ||
     adminUser?.email ||

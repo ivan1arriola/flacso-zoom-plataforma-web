@@ -70,9 +70,56 @@ function getPendingKey(email: string): string {
   return `${PENDING_KEY_PREFIX}${email}`;
 }
 
+function normalizeBaseUrl(value: string): string {
+  return value.trim().replace(/\/+$/, "");
+}
+
+function parseBaseUrlCandidate(value?: string): string | null {
+  const raw = typeof value === "string" ? value.trim() : "";
+  if (!raw) return null;
+
+  const withProtocol = /^[a-z][a-z0-9+.-]*:\/\//i.test(raw) ? raw : `https://${raw}`;
+  try {
+    const url = new URL(withProtocol);
+    return normalizeBaseUrl(url.toString());
+  } catch {
+    return null;
+  }
+}
+
+function isLocalBaseUrl(value: string): boolean {
+  try {
+    const url = new URL(value);
+    return url.hostname === "localhost" || url.hostname === "127.0.0.1" || url.hostname === "::1";
+  } catch {
+    return false;
+  }
+}
+
 function getPublicBaseUrl(origin?: string): string {
-  if (env.APP_BASE_URL) return env.APP_BASE_URL;
-  if (origin) return origin;
+  const allowLocalBaseUrl = env.NODE_ENV !== "production";
+  const candidates = [
+    process.env.VERCEL_PROD_APP_BASE_URL,
+    env.APP_BASE_URL,
+    origin,
+    process.env.NEXTAUTH_URL,
+    process.env.NEXT_PUBLIC_APP_URL,
+    process.env.VERCEL_PROJECT_PRODUCTION_URL,
+    process.env.VERCEL_URL
+  ];
+
+  for (const candidate of candidates) {
+    const parsed = parseBaseUrlCandidate(candidate);
+    if (!parsed) continue;
+    if (allowLocalBaseUrl || !isLocalBaseUrl(parsed)) {
+      return parsed;
+    }
+  }
+
+  if (env.NODE_ENV === "production") {
+    logger.error("No se pudo resolver una URL publica para enlaces de autenticacion. Se usa localhost como fallback.");
+  }
+
   return "http://localhost:3000";
 }
 
@@ -456,7 +503,7 @@ export async function requestFlacsoRegistration(
   return {};
 }
 
-export async function verifyFlacsoRegistration(emailRaw: string, token: string): Promise<void> {
+export async function verifyFlacsoRegistration(emailRaw: string, token: string, origin?: string): Promise<void> {
   const email = normalizeEmail(emailRaw);
 
   const pending = await db.appSetting.findUnique({ where: { key: getPendingKey(email) } });
@@ -508,7 +555,7 @@ export async function verifyFlacsoRegistration(emailRaw: string, token: string):
   });
 
   const payload = buildAccountConfirmedEmail({
-    baseUrl: getPublicBaseUrl(),
+    baseUrl: getPublicBaseUrl(origin),
     firstName: parsed.data.firstName,
     lastName: parsed.data.lastName
   });

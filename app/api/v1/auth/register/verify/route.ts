@@ -9,6 +9,16 @@ const bodySchema = z.object({
   token: z.string().min(1)
 });
 
+function resolveRequestOrigin(request: Request): string | undefined {
+  const originHeader = request.headers.get("origin");
+  if (originHeader) return originHeader;
+  try {
+    return new URL(request.url).origin;
+  } catch {
+    return undefined;
+  }
+}
+
 export async function POST(request: Request) {
   const json = await request.json().catch(() => null);
   const parsed = bodySchema.safeParse(json);
@@ -18,7 +28,8 @@ export async function POST(request: Request) {
   }
 
   try {
-    await verifyFlacsoRegistration(parsed.data.email, parsed.data.token);
+    const origin = resolveRequestOrigin(request);
+    await verifyFlacsoRegistration(parsed.data.email, parsed.data.token, origin);
     return NextResponse.json({ ok: true, message: "Cuenta verificada correctamente." });
   } catch (error) {
     const message = error instanceof Error ? error.message : "No se pudo verificar el registro.";

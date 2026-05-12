@@ -11,6 +11,16 @@ const bodySchema = z.object({
   lastName: z.string().min(1).max(80).optional()
 });
 
+function resolveRequestOrigin(request: Request): string | undefined {
+  const originHeader = request.headers.get("origin");
+  if (originHeader) return originHeader;
+  try {
+    return new URL(request.url).origin;
+  } catch {
+    return undefined;
+  }
+}
+
 export async function POST(request: Request) {
   const json = await request.json().catch(() => null);
   const parsed = bodySchema.safeParse(json);
@@ -20,7 +30,7 @@ export async function POST(request: Request) {
   }
 
   try {
-    const origin = request.headers.get("origin") ?? undefined;
+    const origin = resolveRequestOrigin(request);
     const result = await requestFlacsoRegistration({
       email: parsed.data.email,
       password: parsed.data.password,
