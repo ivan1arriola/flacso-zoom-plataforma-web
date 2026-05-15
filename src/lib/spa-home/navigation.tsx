@@ -266,8 +266,8 @@ export const ROLE_PRESENTATION_TABS: Record<ViewRole, readonly Tab[]> = {
 
 export const ROLE_DEFAULT_TAB: Record<ViewRole, Tab> = {
   ADMINISTRADOR: "dashboard",
-  ASISTENTE_ZOOM: "agenda_libre",
-  DOCENTE: "solicitudes",
+  ASISTENTE_ZOOM: "dashboard",
+  DOCENTE: "dashboard",
   CONTADURIA: "dashboard"
 };
 
