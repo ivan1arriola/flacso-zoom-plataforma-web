@@ -137,6 +137,7 @@ export async function updateUpcomingZoomEvent(
     inicioProgramadoAt?: string;
     finProgramadoAt?: string;
     timezone?: string;
+    modalidadReunion?: string;
   }
 ): Promise<{
   success: boolean;
@@ -152,6 +153,7 @@ export async function updateUpcomingZoomEvent(
       responsibleChanged: boolean;
       descriptionChanged: boolean;
       scheduleChanged: boolean;
+      modalidadChanged: boolean;
     };
   };
 }> {
@@ -174,6 +176,7 @@ export async function updateUpcomingZoomEvent(
         responsibleChanged: boolean;
         descriptionChanged: boolean;
         scheduleChanged: boolean;
+        modalidadChanged: boolean;
       };
     };
   };

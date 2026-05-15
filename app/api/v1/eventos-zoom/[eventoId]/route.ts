@@ -15,7 +15,8 @@ const bodySchema = z
     descripcion: z.string().trim().max(5000).optional().or(z.literal("")),
     inicioProgramadoAt: z.string().trim().min(1).optional(),
     finProgramadoAt: z.string().trim().min(1).optional(),
-    timezone: z.string().trim().max(80).optional().or(z.literal(""))
+    timezone: z.string().trim().max(80).optional().or(z.literal("")),
+    modalidadReunion: z.enum(["VIRTUAL", "HIBRIDA"]).optional()
   })
   .refine(
     (value) =>
@@ -25,7 +26,8 @@ const bodySchema = z
       value.descripcion !== undefined ||
       value.inicioProgramadoAt !== undefined ||
       value.finProgramadoAt !== undefined ||
-      value.timezone !== undefined,
+      value.timezone !== undefined ||
+      value.modalidadReunion !== undefined,
     {
       message: "Debes enviar al menos un campo para actualizar."
     }
@@ -67,7 +69,8 @@ export async function PATCH(request: Request, context: Params) {
         typeof parsed.data.finProgramadoAt === "string"
           ? parsed.data.finProgramadoAt
           : undefined,
-      timezone: typeof parsed.data.timezone === "string" ? parsed.data.timezone : undefined
+      timezone: typeof parsed.data.timezone === "string" ? parsed.data.timezone : undefined,
+      modalidadReunion: parsed.data.modalidadReunion
     });
 
     return NextResponse.json({ result });

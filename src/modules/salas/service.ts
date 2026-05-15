@@ -9390,6 +9390,7 @@ export class SalasService {
       inicioProgramadoAt?: string;
       finProgramadoAt?: string;
       timezone?: string;
+      modalidadReunion?: ModalidadReunion;
     }
   ) {
     const event = await db.eventoZoom.findUnique({
@@ -9580,9 +9581,12 @@ export class SalasService {
       nextStart.getTime() !== previousStart.getTime() ||
       nextEnd.getTime() !== previousEnd.getTime() ||
       nextTimezone !== previousTimezone;
+    const previousModalidad = event.modalidadReunion;
+    const normalizedModalidad = input.modalidadReunion || previousModalidad;
+    const modalidadChanged = normalizedModalidad !== previousModalidad;
 
     const hasChanges =
-      titleChanged || programChanged || responsibleChanged || descriptionChanged || scheduleChanged;
+      titleChanged || programChanged || responsibleChanged || descriptionChanged || scheduleChanged || modalidadChanged;
     if (!hasChanges) {
       return {
         updated: false,
@@ -9738,7 +9742,7 @@ export class SalasService {
       }
     }
 
-    const activeRate = await getActiveRate(event.modalidadReunion);
+    const activeRate = await getActiveRate(normalizedModalidad);
     const estimatedCost =
       activeRate != null
         ? calculateEstimatedCost(durationMinutes, Number(activeRate.valorHora))
@@ -9748,6 +9752,7 @@ export class SalasService {
       await tx.eventoZoom.update({
         where: { id: eventoId },
         data: {
+          modalidadReunion: normalizedModalidad,
           inicioProgramadoAt: nextStart,
           finProgramadoAt: nextEnd,
           timezone: nextTimezone,
@@ -9794,6 +9799,7 @@ export class SalasService {
           responsableNombre: normalizedResponsible || null,
           docentesCorreos: responsibleChanged ? nextDocentesCorreos : event.solicitud.docentesCorreos,
           descripcion: normalizedDescription,
+          modalidadReunion: normalizedModalidad,
           timezone: nextTimezone,
           fechaInicioSolicitada: firstEvent.inicioProgramadoAt,
           fechaFinSolicitada: firstEvent.finProgramadoAt,
@@ -9813,6 +9819,8 @@ export class SalasService {
             estadoAsignacion: { in: [EstadoAsignacion.ASIGNADO, EstadoAsignacion.ACEPTADO] }
           },
           data: {
+            modalidadSnapshot: normalizedModalidad,
+            tarifaAplicadaHora: activeRate.valorHora,
             montoEstimado: estimatedCost ?? undefined
           }
         });
@@ -9829,6 +9837,7 @@ export class SalasService {
             programaNombre: previousProgram || null,
             responsableNombre: previousResponsible || null,
             descripcion: previousDescription || null,
+            modalidadReunion: previousModalidad,
             inicioProgramadoAt: previousStart.toISOString(),
             finProgramadoAt: previousEnd.toISOString(),
             timezone: previousTimezone
@@ -9838,6 +9847,7 @@ export class SalasService {
             programaNombre: normalizedProgram || null,
             responsableNombre: normalizedResponsible || null,
             descripcion: normalizedDescription,
+            modalidadReunion: normalizedModalidad,
             inicioProgramadoAt: nextStart.toISOString(),
             finProgramadoAt: nextEnd.toISOString(),
             timezone: nextTimezone

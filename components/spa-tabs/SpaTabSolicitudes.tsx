@@ -110,6 +110,9 @@ interface SpaTabSolicitudesProps {
     responsableNombre?: string;
     docenteCreadorNombre?: string;
     isRecurring?: boolean;
+    inicioProgramadoAt?: string;
+    finProgramadoAt?: string;
+    modalidadReunion?: string;
   }) => Promise<boolean>;
   canReassignRecurringSolicitud: boolean;
   onReassignRecurringSolicitud: (input: {
@@ -165,6 +168,9 @@ type EditMeetingFormState = {
   programaNombre: string;
   responsableNombre: string;
   docenteCreadorNombre: string;
+  modalidadReunion: string;
+  inicioProgramadoAt: string;
+  finProgramadoAt: string;
 };
 
 function buildEmptyEditMeetingForm(): EditMeetingFormState {
@@ -172,7 +178,10 @@ function buildEmptyEditMeetingForm(): EditMeetingFormState {
     titulo: "",
     programaNombre: "",
     responsableNombre: "",
-    docenteCreadorNombre: ""
+    docenteCreadorNombre: "",
+    modalidadReunion: "VIRTUAL",
+    inicioProgramadoAt: "",
+    finProgramadoAt: ""
   };
 }
 
@@ -775,7 +784,7 @@ export function SpaTabSolicitudes({
   function openEditMeetingDialog(
     solicitud: Pick<
       Solicitud,
-      "id" | "titulo" | "programaNombre" | "responsableNombre" | "tipoInstancias" | "requestedBy"
+      "id" | "titulo" | "programaNombre" | "responsableNombre" | "tipoInstancias" | "requestedBy" | "modalidadReunion"
     >,
     instance: NonNullable<Solicitud["zoomInstances"]>[number]
   ) {
@@ -798,7 +807,10 @@ export function SpaTabSolicitudes({
       responsableNombre: (solicitud.responsableNombre ?? "").trim(),
       docenteCreadorNombre: creatorInOptions
         ? currentCreator
-        : currentCreator || currentResponsible
+        : currentCreator || currentResponsible,
+      modalidadReunion: instance.modalidadReunion || solicitud.modalidadReunion || "VIRTUAL",
+      inicioProgramadoAt: toDateTimeLocalInput(instance.startTime),
+      finProgramadoAt: toDateTimeLocalInput(resolveInstanceEndIso(instance))
     });
   }
 
@@ -837,7 +849,10 @@ export function SpaTabSolicitudes({
           editMeetingDialogSolicitud.isRecurring && canReassignRecurringSolicitud
             ? normalizedCreator
             : undefined,
-        isRecurring: editMeetingDialogSolicitud.isRecurring
+        isRecurring: editMeetingDialogSolicitud.isRecurring,
+        inicioProgramadoAt: new Date(editMeetingForm.inicioProgramadoAt).toISOString(),
+        finProgramadoAt: new Date(editMeetingForm.finProgramadoAt).toISOString(),
+        modalidadReunion: editMeetingForm.modalidadReunion
       });
 
       if (success) {
@@ -3271,7 +3286,7 @@ export function SpaTabSolicitudes({
           </Typography>
           {editMeetingDialogSolicitud?.isRecurring ? (
             <Typography variant="caption" color="info.main" sx={{ display: "block", mb: 1.2, fontWeight: 600 }}>
-              Los cambios se aplicarán a toda la recurrencia. Las fechas se gestionan desde "Detalle de fechas".
+              Modificando una instancia específica de la serie.
             </Typography>
           ) : null}
           <TextField
@@ -3371,6 +3386,59 @@ export function SpaTabSolicitudes({
               helperText="Solo administración puede cambiar la persona a cargo."
             />
           )}
+
+          <TextField
+            margin="dense"
+            label="Modalidad"
+            select
+            fullWidth
+            required
+            value={editMeetingForm.modalidadReunion}
+            onChange={(event) =>
+              setEditMeetingForm((prev) => ({
+                ...prev,
+                modalidadReunion: event.target.value
+              }))
+            }
+            disabled={isSubmittingEditMeeting}
+          >
+            <MenuItem value="VIRTUAL">VIRTUAL</MenuItem>
+            <MenuItem value="HIBRIDA">HÍBRIDA</MenuItem>
+          </TextField>
+
+          <Stack direction="row" spacing={2} sx={{ mt: 1 }}>
+            <TextField
+              label="Inicio"
+              type="datetime-local"
+              fullWidth
+              required
+              value={editMeetingForm.inicioProgramadoAt}
+              onChange={(event) =>
+                setEditMeetingForm((prev) => ({
+                  ...prev,
+                  inicioProgramadoAt: event.target.value
+                }))
+              }
+              InputLabelProps={{ shrink: true }}
+              disabled={isSubmittingEditMeeting}
+            />
+            <TextField
+              label="Fin"
+              type="datetime-local"
+              fullWidth
+              required
+              value={editMeetingForm.finProgramadoAt}
+              onChange={(event) =>
+                setEditMeetingForm((prev) => ({
+                  ...prev,
+                  finProgramadoAt: event.target.value
+                }))
+              }
+              InputLabelProps={{ shrink: true }}
+              disabled={isSubmittingEditMeeting}
+            />
+          </Stack>
+
           {canReassignRecurringSolicitud && editMeetingDialogSolicitud?.isRecurring ? (
             <TextField
               margin="dense"

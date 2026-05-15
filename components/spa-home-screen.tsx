@@ -1428,6 +1428,9 @@ export function SpaHomeScreen() {
     responsableNombre?: string;
     docenteCreadorNombre?: string;
     isRecurring?: boolean;
+    inicioProgramadoAt?: string;
+    finProgramadoAt?: string;
+    modalidadReunion?: string;
   }): Promise<boolean> {
     setMessage("");
 
@@ -1448,7 +1451,10 @@ export function SpaHomeScreen() {
       const updateMeetingResponse = await updateUpcomingZoomEventApi(input.eventoId, {
         titulo: normalizedTitle,
         programaNombre: normalizedProgram,
-        responsableNombre: normalizedResponsible || undefined
+        responsableNombre: normalizedResponsible || undefined,
+        inicioProgramadoAt: input.inicioProgramadoAt,
+        finProgramadoAt: input.finProgramadoAt,
+        modalidadReunion: input.modalidadReunion
       });
 
       if (!updateMeetingResponse.success) {
