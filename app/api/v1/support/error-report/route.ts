@@ -24,7 +24,10 @@ const reportSchema = z.object({
   digest: z.string().trim().max(200).optional(),
   url: z.string().trim().url().max(2000).optional(),
   userAgent: z.string().trim().max(2000).optional(),
-  timestamp: z.string().trim().max(80).optional()
+  timestamp: z.string().trim().max(80).optional(),
+  filename: z.string().trim().max(2000).optional(),
+  line: z.number().int().nonnegative().max(2_000_000).optional(),
+  column: z.number().int().nonnegative().max(2_000_000).optional()
 });
 
 const REPORT_DEDUP_WINDOW_MS = 10 * 60 * 1000;
@@ -52,10 +55,39 @@ function escapeHtml(value: string): string {
 }
 
 function buildReportFingerprint(input: z.infer<typeof reportSchema>): string {
-  const normalized = [input.source, input.message, input.digest ?? "", input.url ?? "", input.stack ?? ""].join(
-    "|"
-  );
+  const normalized = [
+    input.source,
+    input.message,
+    input.digest ?? "",
+    input.url ?? "",
+    input.stack ?? "",
+    input.filename ?? "",
+    input.line ?? "",
+    input.column ?? ""
+  ].join("|");
   return createHash("sha256").update(normalized).digest("hex");
+}
+
+function shouldIgnoreReport(input: z.infer<typeof reportSchema>): boolean {
+  if (input.source !== "window.error") return false;
+  const normalizedMessage = input.message.trim().toLowerCase();
+  const isOpaqueScriptError =
+    normalizedMessage === "script error." || normalizedMessage === "script error";
+  if (!isOpaqueScriptError) return false;
+  if (cleanOptional(input.stack)) return false;
+
+  const source = cleanOptional(input.filename)?.toLowerCase();
+  if (!source) return true;
+  if (
+    source.startsWith("chrome-extension://") ||
+    source.startsWith("moz-extension://") ||
+    source.startsWith("safari-web-extension://") ||
+    source.startsWith("webkit-masked-url://")
+  ) {
+    return true;
+  }
+
+  return false;
 }
 
 function wasRecentlyReported(fingerprint: string): boolean {
@@ -83,6 +115,9 @@ function buildReportHtml(params: {
   url?: string;
   userAgent?: string;
   timestamp?: string;
+  filename?: string;
+  line?: number;
+  column?: number;
   ip?: string;
   userEmail?: string;
   userRole?: string;
@@ -92,6 +127,9 @@ function buildReportHtml(params: {
     ["Mensaje", params.message],
     ["Digest", params.digest],
     ["URL", params.url],
+    ["Archivo", params.filename],
+    ["Linea", params.line?.toString()],
+    ["Columna", params.column?.toString()],
     ["Timestamp cliente", params.timestamp],
     ["Usuario autenticado", params.userEmail],
     ["Rol", params.userRole],
@@ -132,12 +170,13 @@ export async function POST(request: Request) {
   const input = parsed.data;
   const fingerprint = buildReportFingerprint(input);
   const duplicate = wasRecentlyReported(fingerprint);
+  const ignored = shouldIgnoreReport(input);
   const user = await getSessionUser().catch(() => null);
   const ip =
     normalizeForwardedIp(request.headers.get("x-forwarded-for")) ??
     normalizeForwardedIp(request.headers.get("x-real-ip"));
 
-  if (!duplicate) {
+  if (!duplicate && !ignored) {
     const emailClient = new EmailClient();
     const subject = `Alerta de error app (${input.source})`;
 
@@ -147,6 +186,9 @@ export async function POST(request: Request) {
       stack: cleanOptional(input.stack),
       digest: cleanOptional(input.digest),
       url: cleanOptional(input.url),
+      filename: cleanOptional(input.filename),
+      line: input.line,
+      column: input.column,
       userAgent: cleanOptional(input.userAgent),
       timestamp: cleanOptional(input.timestamp),
       ip,
@@ -181,6 +223,9 @@ export async function POST(request: Request) {
         details: {
           source: input.source,
           url: cleanOptional(input.url),
+          filename: cleanOptional(input.filename),
+          line: input.line,
+          column: input.column,
           ip,
           hasStack: Boolean(cleanOptional(input.stack))
         }
@@ -196,7 +241,8 @@ export async function POST(request: Request) {
 
   return NextResponse.json({
     ok: true,
-    duplicate
+    duplicate,
+    ignored
   });
 }
 

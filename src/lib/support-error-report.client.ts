@@ -15,6 +15,9 @@ export type SupportErrorReportPayload = {
   url?: string;
   userAgent?: string;
   timestamp?: string;
+  filename?: string;
+  line?: number;
+  column?: number;
 };
 
 const REPORT_ENDPOINT = "/api/v1/support/error-report";
@@ -28,6 +31,13 @@ function cleanString(value: unknown): string | undefined {
   if (typeof value !== "string") return undefined;
   const trimmed = value.trim();
   return trimmed ? trimmed : undefined;
+}
+
+function cleanNumber(value: unknown): number | undefined {
+  if (typeof value !== "number") return undefined;
+  if (!Number.isFinite(value)) return undefined;
+  if (value < 0) return undefined;
+  return Math.floor(value);
 }
 
 export function toSerializableError(reason: unknown): { message: string; stack?: string } {
@@ -78,7 +88,10 @@ export async function reportSupportError(payload: SupportErrorReportPayload): Pr
     userAgent:
       cleanString(payload.userAgent) ??
       (typeof navigator !== "undefined" ? navigator.userAgent : undefined),
-    timestamp: cleanString(payload.timestamp) ?? new Date().toISOString()
+    timestamp: cleanString(payload.timestamp) ?? new Date().toISOString(),
+    filename: cleanString(payload.filename),
+    line: cleanNumber(payload.line),
+    column: cleanNumber(payload.column)
   };
 
   try {

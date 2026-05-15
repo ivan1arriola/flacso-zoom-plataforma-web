@@ -22,13 +22,53 @@ export function SupportErrorListener() {
   const reportsSentRef = useRef(0);
 
   useEffect(() => {
+    const isIgnorableWindowError = (
+      event: ErrorEvent,
+      normalizedMessage: string,
+      stack?: string
+    ): boolean => {
+      const message = normalizedMessage.trim().toLowerCase();
+      if (message !== "script error." && message !== "script error") {
+        return false;
+      }
+      if (stack && stack.trim().length > 0) {
+        return false;
+      }
+
+      const source = (event.filename ?? "").trim().toLowerCase();
+      if (!source) return true;
+      if (
+        source.startsWith("chrome-extension://") ||
+        source.startsWith("moz-extension://") ||
+        source.startsWith("safari-web-extension://") ||
+        source.startsWith("webkit-masked-url://")
+      ) {
+        return true;
+      }
+      return false;
+    };
+
     const sendReport = async (
       source: SupportErrorReportSource,
       rawMessage: string,
-      stack?: string
+      stack?: string,
+      metadata?: {
+        filename?: string;
+        line?: number;
+        column?: number;
+      }
     ) => {
       const normalizedMessage = rawMessage.trim() || "Error inesperado";
-      const fingerprint = `${source}|${normalizedMessage}|${stack ?? ""}`.slice(0, 4000);
+      const fingerprint = [
+        source,
+        normalizedMessage,
+        stack ?? "",
+        metadata?.filename ?? "",
+        metadata?.line ?? "",
+        metadata?.column ?? ""
+      ]
+        .join("|")
+        .slice(0, 4000);
 
       setMessage(buildSupportContactMessage("Ocurrio un error inesperado."));
       setOpen(true);
@@ -42,16 +82,27 @@ export function SupportErrorListener() {
       await reportSupportError({
         source,
         message: normalizedMessage,
-        stack
+        stack,
+        filename: metadata?.filename,
+        line: metadata?.line,
+        column: metadata?.column
       });
     };
 
     const onWindowError = (event: ErrorEvent) => {
       const serialized = toSerializableError(event.error ?? event.message);
+      if (isIgnorableWindowError(event, serialized.message, serialized.stack)) {
+        return;
+      }
       void sendReport(
         "window.error",
         serialized.message || "Error de JavaScript no controlado.",
-        serialized.stack
+        serialized.stack,
+        {
+          filename: event.filename,
+          line: event.lineno,
+          column: event.colno
+        }
       );
     };
 
