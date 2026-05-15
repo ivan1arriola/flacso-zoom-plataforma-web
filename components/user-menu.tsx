@@ -17,10 +17,15 @@ import {
 } from "@mui/material";
 import LogoutIcon from "@mui/icons-material/Logout";
 import PersonIcon from "@mui/icons-material/Person";
+import PersonAddIcon from "@mui/icons-material/PersonAdd";
+import CloseIcon from "@mui/icons-material/Close";
 import ArrowDropDownIcon from "@mui/icons-material/ArrowDropDown";
 import ArrowDropUpIcon from "@mui/icons-material/ArrowDropUp";
 import { UserAvatar } from "./user-avatar";
 import { normalizeAssistantRole } from "@/src/lib/spa-home/navigation";
+import { useMultiAccount } from "@/src/hooks/useMultiAccount";
+import { signIn } from "next-auth/react";
+import { useEffect } from "react";
 
 function formatRoleLabel(role: string): string {
   const normalized = normalizeAssistantRole(role.toUpperCase());
@@ -44,6 +49,13 @@ interface UserMenuProps {
 export function UserMenu({ firstName, lastName, email, image, role, vertical = false, iconOnly = false }: UserMenuProps) {
   const [anchorEl, setAnchorEl] = useState<HTMLElement | null>(null);
   const router = useRouter();
+  const { identities, isLoading, switchAccount, removeAccount, syncCurrentAccount } = useMultiAccount();
+
+  useEffect(() => {
+    if (email) {
+      syncCurrentAccount();
+    }
+  }, [email, syncCurrentAccount]);
 
   const displayName = useMemo(() => {
     const fullName = [firstName, lastName].filter(Boolean).join(" ").trim();
@@ -54,6 +66,12 @@ export function UserMenu({ firstName, lastName, email, image, role, vertical = f
 
   const primaryLabel = displayName;
   const secondaryLabel = formatRoleLabel(role);
+
+  // Filtrar la cuenta actual de la lista de identidades para mostrar solo las "otras"
+  const otherIdentities = useMemo(() => {
+    if (!email) return identities;
+    return identities.filter((id) => id.email.toLowerCase() !== email.toLowerCase());
+  }, [identities, email]);
 
   return (
     <>
@@ -116,7 +134,8 @@ export function UserMenu({ firstName, lastName, email, image, role, vertical = f
             width: { xs: "min(92vw, 360px)", sm: 360 },
             borderRadius: 4,
             mt: 1,
-            boxShadow: "0 12px 40px rgba(0,0,0,0.15)"
+            boxShadow: "0 12px 40px rgba(0,0,0,0.15)",
+            overflow: "hidden"
           }
         }}
       >
@@ -135,22 +154,81 @@ export function UserMenu({ firstName, lastName, email, image, role, vertical = f
         </Box>
         <Divider />
 
+        <Box sx={{ maxHeight: 240, overflow: "auto" }}>
+          {otherIdentities.map((identity) => (
+            <MenuItem
+              key={identity.email}
+              onClick={() => {
+                setAnchorEl(null);
+                switchAccount(identity.email);
+              }}
+              sx={{ px: 2.5, py: 1.5 }}
+            >
+              <Stack direction="row" spacing={1.5} alignItems="center" sx={{ width: "100%" }}>
+                <UserAvatar firstName={identity.firstName} lastName={identity.lastName} image={identity.image} size={32} />
+                <Box sx={{ minWidth: 0, flexGrow: 1 }}>
+                  <Typography variant="body2" sx={{ fontWeight: 700 }} noWrap>
+                    {[identity.firstName, identity.lastName].filter(Boolean).join(" ") || identity.email}
+                  </Typography>
+                  <Typography variant="caption" color="text.secondary" noWrap sx={{ display: "block" }}>
+                    {identity.email}
+                  </Typography>
+                </Box>
+                <IconButton
+                  size="small"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    removeAccount(identity.email);
+                  }}
+                  sx={{ opacity: 0.5, "&:hover": { opacity: 1 } }}
+                >
+                  <CloseIcon fontSize="inherit" />
+                </IconButton>
+              </Stack>
+            </MenuItem>
+          ))}
+        </Box>
+
+        {otherIdentities.length > 0 && <Divider />}
+
+        <MenuItem
+          onClick={async () => {
+            setAnchorEl(null);
+            // Guardar actual y luego ir a login para agregar otra
+            await syncCurrentAccount();
+            await signIn(undefined, { callbackUrl: "/" });
+          }}
+          sx={{ px: 2.5 }}
+        >
+          <ListItemIcon>
+            <PersonAddIcon fontSize="small" />
+          </ListItemIcon>
+          <ListItemText primaryTypographyProps={{ variant: "body2", fontWeight: 600 }}>
+            Agregar otra cuenta
+          </ListItemText>
+        </MenuItem>
+
         <MenuItem
           onClick={() => {
             setAnchorEl(null);
             router.push("/?tab=perfil");
           }}
+          sx={{ px: 2.5 }}
         >
           <ListItemIcon>
             <PersonIcon fontSize="small" />
           </ListItemIcon>
           <ListItemText primaryTypographyProps={{ variant: "body2", fontWeight: 600 }}>Mi perfil</ListItemText>
         </MenuItem>
+        
+        <Divider />
+        
         <MenuItem
           onClick={async () => {
             setAnchorEl(null);
             await signOut({ redirectTo: "/" });
           }}
+          sx={{ px: 2.5 }}
         >
           <ListItemIcon>
             <LogoutIcon fontSize="small" color="error" />
