@@ -5774,20 +5774,17 @@ export class SalasService {
         };
       })
       .filter((item): item is NonNullable<typeof item> => item !== null);
-  }
-
-  async updatePastMeeting(
-    admin: SessionUser,
+   async updatePastMeeting(
+    user: SessionUser,
     eventoId: string,
     input: {
       programaNombre?: string;
       monitorEmail?: string;
+      minutosReales?: number;
+      inicioRealAt?: string | Date;
+      finRealAt?: string | Date;
     }
   ) {
-    if (admin.role !== UserRole.ADMINISTRADOR) {
-      throw new Error("Forbidden");
-    }
-
     const event = await db.eventoZoom.findUnique({
       where: { id: eventoId },
       select: {
@@ -5802,6 +5799,8 @@ export class SalasService {
         solicitud: {
           select: {
             id: true,
+            docente: { select: { usuarioId: true } },
+            createdByUserId: true,
             titulo: true,
             programaNombre: true,
             requiereAsistencia: true
@@ -5816,6 +5815,7 @@ export class SalasService {
           take: 1,
           select: {
             id: true,
+            tarifaAplicadaHora: true,
             asistente: {
               select: {
                 usuario: {
@@ -5834,8 +5834,20 @@ export class SalasService {
       throw new Error("Reunion no encontrada.");
     }
 
+    const canManageAll =
+      user.role === UserRole.ADMINISTRADOR ||
+      user.role === UserRole.CONTADURIA;
+
+    if (
+      !canManageAll &&
+      event.solicitud.docente.usuarioId !== user.id &&
+      event.solicitud.createdByUserId !== user.id
+    ) {
+      throw new Error("No tienes permisos para editar esta reunion.");
+    }
+
     const eventEnd = event.finRealAt ?? event.finProgramadoAt;
-    if (eventEnd > new Date()) {
+    if (eventEnd > new Date() && user.role !== UserRole.ADMINISTRADOR) {
       throw new Error("Solo se pueden editar reuniones que ya finalizaron.");
     }
 
@@ -5849,6 +5861,21 @@ export class SalasService {
     const currentMonitorEmail =
       event.asignaciones[0]?.asistente.usuario.email?.trim().toLowerCase() ?? null;
     const shouldUpdateMonitor = Boolean(normalizedMonitorEmail) && normalizedMonitorEmail !== currentMonitorEmail;
+
+    const inicioRealAt = input.inicioRealAt ? new Date(input.inicioRealAt) : event.inicioRealAt;
+    const finRealAt = input.finRealAt ? new Date(input.finRealAt) : event.finRealAt;
+    
+    // Si se enviaron minutos explícitos, usarlos. Si no, calcular si hay fechas reales nuevas.
+    let minutosReales = input.minutosReales;
+    if (minutosReales === undefined && (input.inicioRealAt || input.finRealAt)) {
+      const start = inicioRealAt ?? event.inicioProgramadoAt;
+      const end = finRealAt ?? event.finProgramadoAt;
+      minutosReales = Math.max(1, Math.floor((end.getTime() - start.getTime()) / 60000));
+    }
+    
+    // Si aún es undefined, mantener el actual o el programado
+    const finalMinutosReales = minutosReales ?? event.minutosReales ?? 
+      Math.max(1, Math.floor(((finRealAt ?? event.finProgramadoAt).getTime() - (inicioRealAt ?? event.inicioProgramadoAt).getTime()) / 60000));
 
     let monitorUser:
       | {
@@ -5886,14 +5913,14 @@ export class SalasService {
       };
     }
 
-    const start = event.inicioRealAt ?? event.inicioProgramadoAt;
-    const end = event.finRealAt ?? event.finProgramadoAt;
-    const durationMinutes =
-      event.minutosReales ?? Math.max(1, Math.floor((end.getTime() - start.getTime()) / 60000));
-    const amount =
-      rate != null
-        ? calculateEstimatedCost(durationMinutes, Number(rate.valorHora))
-        : null;
+    // Calcular nuevo costo si cambió la duración o el monitor
+    let newAmount: Prisma.Decimal | null = null;
+    if (shouldUpdateMonitor && rate) {
+      newAmount = calculateEstimatedCost(finalMinutosReales, Number(rate.valorHora));
+    } else if (event.asignaciones[0] && (finalMinutosReales !== event.minutosReales)) {
+      // Si solo cambió la duración, recalcular con la tarifa ya pactada
+      newAmount = calculateEstimatedCost(finalMinutosReales, Number(event.asignaciones[0].tarifaAplicadaHora));
+    }
 
     await db.$transaction(async (tx) => {
       await tx.solicitudSala.update({
@@ -5908,7 +5935,7 @@ export class SalasService {
         }
       });
 
-      if (shouldUpdateMonitor && monitorUser && rate && amount) {
+      if (shouldUpdateMonitor && monitorUser && rate && newAmount) {
         const assistant = await tx.asistenteZoom.upsert({
           where: { usuarioId: monitorUser.id },
           create: { usuarioId: monitorUser.id },
@@ -5934,42 +5961,56 @@ export class SalasService {
             asistenteZoomId: assistant.id,
             tipoAsignacion: TipoAsignacionAsistente.PRINCIPAL,
             estadoAsignacion: EstadoAsignacion.ACEPTADO,
-            asignadoPorUsuarioId: admin.id,
+            asignadoPorUsuarioId: user.id,
             motivoAsignacion: "Ajuste administrativo de reunion pasada.",
             reasignacionDeId: previousAssignmentId ?? undefined,
             fechaRespuestaAt: new Date(),
             modalidadSnapshot: event.modalidadReunion,
             tarifaAplicadaHora: rate.valorHora,
             moneda: rate.moneda,
-            montoEstimado: amount,
-            montoConfirmado: amount
+            montoEstimado: newAmount,
+            montoConfirmado: newAmount
           }
         });
-
-        await tx.eventoZoom.update({
-          where: { id: eventoId },
+      } else if (newAmount && event.asignaciones[0]) {
+        // Actualizar monto de la asignación actual si solo cambió la duración
+        await tx.asignacionAsistente.update({
+          where: { id: event.asignaciones[0].id },
           data: {
-            requiereAsistencia: true,
-            estadoCobertura: EstadoCoberturaSoporte.CONFIRMADO,
-            costoEstimado: amount,
-            costoReal: amount
+            montoEstimado: newAmount,
+            montoConfirmado: newAmount
           }
         });
       }
 
+      await tx.eventoZoom.update({
+        where: { id: eventoId },
+        data: {
+          inicioRealAt,
+          finRealAt,
+          minutosReales: finalMinutosReales,
+          requiereAsistencia: normalizedMonitorEmail ? true : undefined,
+          estadoCobertura: normalizedMonitorEmail ? EstadoCoberturaSoporte.CONFIRMADO : undefined,
+          costoEstimado: newAmount ?? undefined,
+          costoReal: newAmount ?? undefined
+        }
+      });
+
       await tx.auditoria.create({
         data: {
-          actorUsuarioId: admin.id,
+          actorUsuarioId: user.id,
           accion: "EDICION_REUNION_PASADA",
           entidadTipo: "EventoZoom",
           entidadId: eventoId,
           valorAnterior: {
             programaNombre: event.solicitud.programaNombre ?? null,
-            monitorEmail: currentMonitorEmail
+            monitorEmail: currentMonitorEmail,
+            minutosReales: event.minutosReales
           },
           valorNuevo: {
             programaNombre: programaNombreFinal,
-            monitorEmail: normalizedMonitorEmail || currentMonitorEmail
+            monitorEmail: normalizedMonitorEmail || currentMonitorEmail,
+            minutosReales: finalMinutosReales
           }
         }
       });
@@ -5977,16 +6018,17 @@ export class SalasService {
 
     await notifyAdminInAppMovement({
       action: "EDICION_REUNION_PASADA",
-      actorEmail: admin.email,
-        actorFirstName: admin.firstName,
-        actorLastName: admin.lastName,
-      actorRole: admin.role,
+      actorEmail: user.email,
+      actorFirstName: user.firstName,
+      actorLastName: user.lastName,
+      actorRole: user.role,
       entityType: "EventoZoom",
       entityId: eventoId,
       summary: event.solicitud.titulo,
       details: {
         programaNombre: programaNombreFinal,
-        monitorEmail: normalizedMonitorEmail || currentMonitorEmail
+        monitorEmail: normalizedMonitorEmail || currentMonitorEmail,
+        minutosReales: finalMinutosReales
       }
     });
 

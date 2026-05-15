@@ -2259,6 +2259,7 @@ export function SpaHomeScreen() {
     eventoId: string;
     programaNombre: string;
     monitorEmail?: string;
+    minutosReales?: number;
   }): Promise<boolean> {
     setMessage("");
     setUpdatingPastMeetingId(input.eventoId);
@@ -2266,7 +2267,8 @@ export function SpaHomeScreen() {
       const response = await updatePastMeetingApi({
         eventoId: input.eventoId,
         programaNombre: input.programaNombre,
-        monitorEmail: input.monitorEmail
+        monitorEmail: input.monitorEmail,
+        minutosReales: input.minutosReales
       });
       if (!response.success) {
         setMessage(response.error ?? "No se pudo actualizar la reunion.");

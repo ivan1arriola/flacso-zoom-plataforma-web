@@ -49,6 +49,7 @@ interface SpaTabHistoricoProps {
     eventoId: string;
     programaNombre: string;
     monitorEmail?: string;
+    minutosReales?: number;
   }) => Promise<boolean>;
   pastMeetingForm: PastMeetingForm;
   setPastMeetingForm: (form: PastMeetingForm | ((prev: PastMeetingForm) => PastMeetingForm)) => void;
@@ -97,7 +98,8 @@ export function SpaTabHistorico({
   const [editingMeetingId, setEditingMeetingId] = useState<string | null>(null);
   const [editMeetingForm, setEditMeetingForm] = useState({
     programaNombre: "",
-    monitorEmail: ""
+    monitorEmail: "",
+    minutosReales: 0
   });
   const [copyFeedback, setCopyFeedback] = useState<Record<string, string>>({});
 
@@ -132,7 +134,8 @@ export function SpaTabHistorico({
     const updated = await onUpdatePastMeeting({
       eventoId: editingMeetingId,
       programaNombre: editMeetingForm.programaNombre.trim(),
-      monitorEmail: editMeetingForm.monitorEmail.trim() || undefined
+      monitorEmail: editMeetingForm.monitorEmail.trim() || undefined,
+      minutosReales: editMeetingForm.minutosReales > 0 ? editMeetingForm.minutosReales : undefined
     });
     if (!updated) return;
     setEditingMeetingId(null);
@@ -295,7 +298,8 @@ export function SpaTabHistorico({
                               setEditingMeetingId(meeting.id);
                               setEditMeetingForm({
                                 programaNombre: meeting.programaNombre ?? "",
-                                monitorEmail: meeting.monitorEmail ?? ""
+                                monitorEmail: meeting.monitorEmail ?? "",
+                                minutosReales: meeting.minutosReales ?? 0
                               });
                             }}
                             disabled={Boolean(updatingPastMeetingId)}
@@ -460,6 +464,20 @@ export function SpaTabHistorico({
                                   </MenuItem>
                                 ))}
                               </TextField>
+                              <TextField
+                                label="Duracion real (min)"
+                                type="number"
+                                required
+                                size="small"
+                                value={editMeetingForm.minutosReales}
+                                onChange={(event) =>
+                                  setEditMeetingForm((prev) => ({
+                                    ...prev,
+                                    minutosReales: parseInt(event.target.value) || 0
+                                  }))
+                                }
+                                helperText="Ajusta los minutos segun lo que duro realmente."
+                              />
                             </Box>
                             <Stack direction="row" justifyContent="flex-end" sx={{ mt: 1.2 }}>
                               <Button type="submit" variant="contained" disabled={isUpdating}>

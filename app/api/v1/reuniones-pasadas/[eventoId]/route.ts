@@ -10,13 +10,16 @@ type Params = { params: Promise<{ eventoId: string }> };
 
 const bodySchema = z.object({
   programaNombre: z.string().trim().max(120).optional().or(z.literal("")),
-  monitorEmail: z.string().trim().email("Email asistente invalido.").optional().or(z.literal(""))
+  monitorEmail: z.string().trim().email("Email asistente invalido.").optional().or(z.literal("")),
+  minutosReales: z.number().int().min(1).max(1440).optional()
 });
 
 export async function PATCH(request: Request, context: Params) {
   const user = await getSessionUser();
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  if (user.role !== UserRole.ADMINISTRADOR) {
+  
+  const allowedRoles: UserRole[] = [UserRole.ADMINISTRADOR, UserRole.DOCENTE, UserRole.CONTADURIA];
+  if (!allowedRoles.includes(user.role)) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
@@ -38,7 +41,8 @@ export async function PATCH(request: Request, context: Params) {
           ? parsed.data.programaNombre
           : undefined,
       monitorEmail:
-        typeof parsed.data.monitorEmail === "string" ? parsed.data.monitorEmail : undefined
+        typeof parsed.data.monitorEmail === "string" ? parsed.data.monitorEmail : undefined,
+      minutosReales: parsed.data.minutosReales
     });
     return NextResponse.json({ ok: true });
   } catch (error) {

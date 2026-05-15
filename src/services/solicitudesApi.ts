@@ -249,6 +249,7 @@ export async function updatePastMeeting(input: {
   eventoId: string;
   programaNombre: string;
   monitorEmail?: string;
+  minutosReales?: number;
 }): Promise<{
   success: boolean;
   error?: string;
@@ -259,7 +260,8 @@ export async function updatePastMeeting(input: {
       method: "PATCH",
       ...withJsonBody({
         programaNombre: input.programaNombre,
-        monitorEmail: input.monitorEmail
+        monitorEmail: input.monitorEmail,
+        minutosReales: input.minutosReales
       })
     }
   );
