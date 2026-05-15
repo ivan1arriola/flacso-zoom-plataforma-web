@@ -2582,7 +2582,7 @@ export function SpaHomeScreen() {
       )}
 
       {tab === "mis_asistencias" && canSeeMisAsistencias && user?.id && (
-        <SpaTabMisAsistencias userId={user.id} />
+        <SpaTabMisAsistencias userId={user.id} role={effectiveRole || "DOCENTE"} />
       )}
 
       {tab === "historico_asistencias" && canSeeHistoricoAsistencias && user?.id && (

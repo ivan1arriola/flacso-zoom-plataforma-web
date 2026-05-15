@@ -193,3 +193,22 @@ export async function updateUpcomingZoomEvent(
     result: data.result
   };
 }
+
+export async function reportMeetingDuration(
+  eventoId: string,
+  input: { minutosReportados: number; comentariosReporte?: string }
+): Promise<{ success: boolean; error?: string }> {
+  const response = await fetch(`/api/v1/eventos-zoom/${eventoId}/reporte`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input)
+  });
+  if (!response.ok) {
+    const data = (await response.json()) as { error?: string };
+    return {
+      success: false,
+      error: data.error ?? "No se pudo registrar el reporte."
+    };
+  }
+  return { success: true };
+}

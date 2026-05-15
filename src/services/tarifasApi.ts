@@ -63,6 +63,8 @@ export type PersonHoursMeeting = {
   requiereAsistencia?: boolean;
   responsableNombre?: string | null;
   asistenteNombre?: string | null;
+  minutosReportados: number | null;
+  comentariosReporte: string | null;
   isCompleted: boolean;
 };
 

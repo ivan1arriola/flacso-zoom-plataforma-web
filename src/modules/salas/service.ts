@@ -5765,6 +5765,8 @@ export class SalasService {
           inicioAt: start.toISOString(),
           finAt: end.toISOString(),
           minutosReales: minutes,
+          minutosReportados: event.minutosReportados,
+          comentariosReporte: event.comentariosReporte,
           estadoEvento: event.estadoEvento,
           estadoEjecucion: event.estadoEjecucion,
           docenteNombre: docenteName,
@@ -6029,6 +6031,59 @@ export class SalasService {
         programaNombre: programaNombreFinal,
         monitorEmail: normalizedMonitorEmail || currentMonitorEmail,
         minutosReales: finalMinutosReales
+      }
+    });
+
+    return { ok: true };
+  }
+
+  async reportMeetingDuration(
+    user: SessionUser,
+    eventoId: string,
+    input: { minutosReportados: number; comentariosReporte?: string }
+  ) {
+    const event = await db.eventoZoom.findUnique({
+      where: { id: eventoId },
+      include: {
+        asignaciones: {
+          where: {
+            estadoAsignacion: { in: [EstadoAsignacion.ASIGNADO, EstadoAsignacion.ACEPTADO] }
+          }
+        }
+      }
+    });
+
+    if (!event) throw new Error("Evento no encontrado.");
+    
+    // Si no es admin/contaduria, verificar que sea el asistente asignado
+    const canManageDirectly = [UserRole.ADMINISTRADOR, UserRole.CONTADURIA].includes(user.role);
+    if (!canManageDirectly) {
+      const isAssigned = event.asignaciones.some(a => a.asistenteZoomId === user.id || a.asistenteZoomId === user.asistenteProfileId);
+      // Nota: usualmente user.id es el usuarioId, pero user.asistenteProfileId podria ser necesario segun como este el session user.
+      // Vamos a verificar como se identifica al asistente.
+      if (!isAssigned) {
+        throw new Error("No tienes permisos para reportar en esta reunion.");
+      }
+    }
+
+    await db.eventoZoom.update({
+      where: { id: eventoId },
+      data: {
+        minutosReportados: input.minutosReportados,
+        comentariosReporte: input.comentariosReporte || null
+      }
+    });
+
+    await db.auditoria.create({
+      data: {
+        actorUsuarioId: user.id,
+        accion: "REUNION_DURACION_REPORTADA",
+        entidadTipo: "EventoZoom",
+        entidadId: eventoId,
+        valorNuevo: {
+          minutosReportados: input.minutosReportados,
+          comentariosReporte: input.comentariosReporte
+        }
       }
     });
 
@@ -11104,6 +11159,8 @@ export class SalasService {
         inicioRealAt: Date | null;
         finRealAt: Date | null;
         minutosReales: number | null;
+        minutosReportados: number | null;
+        comentariosReporte: string | null;
         estadoEvento: EstadoEventoZoom;
         estadoEjecucion: EstadoEjecucionEvento;
         timezone: string;
@@ -11205,6 +11262,8 @@ export class SalasService {
         finRealAt: realEnd ? realEnd.toISOString() : null,
         minutosProgramados: scheduledDurationMinutes,
         minutosReales: realDurationMinutes,
+        minutosReportados: event.minutosReportados,
+        comentariosReporte: event.comentariosReporte,
         minutosExtraNoLiquidados: extraNonBillableMinutes,
         requiereRevisionAdminPorExceso: requiresAdminReviewByOverrun,
         requiereGrabacion: recordingRequested,
@@ -11339,6 +11398,8 @@ export class SalasService {
           inicioRealAt: true,
           finRealAt: true,
           minutosReales: true,
+          minutosReportados: true,
+          comentariosReporte: true,
           estadoEvento: true,
           estadoEjecucion: true,
           timezone: true,
@@ -11414,6 +11475,8 @@ export class SalasService {
               inicioRealAt: true,
               finRealAt: true,
               minutosReales: true,
+              minutosReportados: true,
+              comentariosReporte: true,
               estadoEvento: true,
               estadoEjecucion: true,
               timezone: true,
@@ -11480,6 +11543,8 @@ export class SalasService {
             inicioRealAt: true,
             finRealAt: true,
             minutosReales: true,
+            minutosReportados: true,
+            comentariosReporte: true,
             estadoEvento: true,
             estadoEjecucion: true,
             timezone: true,

@@ -23,12 +23,19 @@ import AccessTimeFilledIcon from "@mui/icons-material/AccessTimeFilled";
 import PaidIcon from "@mui/icons-material/Paid";
 import CheckCircleIcon from "@mui/icons-material/CheckCircle";
 import PendingActionsIcon from "@mui/icons-material/PendingActions";
+import EditNoteIcon from "@mui/icons-material/EditNote";
+import CommentIcon from "@mui/icons-material/Comment";
 
 import { loadPersonHours, type PersonHoursMeeting } from "@/src/services/tarifasApi";
+import { reportMeetingDuration } from "@/src/services/agendaApi";
+import { Dialog, DialogTitle, DialogContent, DialogActions, TextField, InputAdornment } from "@mui/material";
 
 interface SpaTabMisAsistenciasProps {
   userId: string;
+  role?: string;
 }
+
+import { updatePastMeeting } from "@/src/services/solicitudesApi";
 
 function formatMinutesAsHHMM(totalMinutes: number): string {
   const normalizedMinutes = Math.max(0, Math.round(totalMinutes));
@@ -51,13 +58,18 @@ function formatCurrency(amount: number): string {
   }).format(amount);
 }
 
-export function SpaTabMisAsistencias({ userId }: SpaTabMisAsistenciasProps) {
+export function SpaTabMisAsistencias({ userId, role }: SpaTabMisAsistenciasProps) {
+  const isDocente = role === "DOCENTE";
   const theme = useTheme();
   const isDarkMode = theme.palette.mode === "dark";
   const [meetings, setMeetings] = useState<PersonHoursMeeting[]>([]);
   const [rates, setRates] = useState<Record<string, { valorHora: number; moneda: string }>>({});
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState("");
+  const [reportDialogOpen, setReportDialogOpen] = useState(false);
+  const [selectedMeetingForReport, setSelectedMeetingForReport] = useState<PersonHoursMeeting | null>(null);
+  const [reportForm, setReportForm] = useState({ minutos: "", comentarios: "" });
+  const [isSubmittingReport, setIsSubmittingReport] = useState(false);
 
   const currentMonthLabel = useMemo(() => getCurrentMonthLabel(), []);
 
@@ -91,6 +103,57 @@ export function SpaTabMisAsistencias({ userId }: SpaTabMisAsistenciasProps) {
       setError("Error al cargar los datos.");
     } finally {
       setIsLoading(false);
+    }
+  }
+
+  function openReportDialog(meeting: PersonHoursMeeting) {
+    setSelectedMeetingForReport(meeting);
+    setReportForm({
+      minutos: String(meeting.minutosReportados || meeting.minutos),
+      comentarios: meeting.comentariosReporte || ""
+    });
+    setReportDialogOpen(true);
+  }
+
+  function closeReportDialog() {
+    setReportDialogOpen(false);
+    setSelectedMeetingForReport(null);
+  }
+
+  async function handleSubmitReport() {
+    if (!selectedMeetingForReport) return;
+    const mins = parseInt(reportForm.minutos);
+    if (isNaN(mins) || mins <= 0) return;
+
+    setIsSubmittingReport(true);
+    try {
+      if (isDocente) {
+        const success = await updatePastMeeting({
+          eventoId: selectedMeetingForReport.eventId,
+          minutosReales: mins
+        });
+        if (success) {
+          void refresh();
+          closeReportDialog();
+        } else {
+          alert("No se pudo actualizar la duración.");
+        }
+      } else {
+        const res = await reportMeetingDuration(selectedMeetingForReport.eventId, {
+          minutosReportados: mins,
+          comentariosReporte: reportForm.comentarios.trim() || undefined
+        });
+        if (res.success) {
+          void refresh();
+          closeReportDialog();
+        } else {
+          alert(res.error || "No se pudo enviar el reporte.");
+        }
+      }
+    } catch {
+      alert("Error al procesar el cambio.");
+    } finally {
+      setIsSubmittingReport(false);
     }
   }
 
@@ -138,7 +201,7 @@ export function SpaTabMisAsistencias({ userId }: SpaTabMisAsistenciasProps) {
             Reuniones de {currentMonthLabel}
           </Typography>
           <Typography variant="body1" color="text.secondary">
-            Control de horas y cotización proyectada para el mes en curso.
+            {isDocente ? "Control de tus reuniones y ajuste de duración real." : "Control de horas y cotización proyectada para el mes en curso."}
           </Typography>
         </Box>
         <Button variant="outlined" onClick={() => void refresh()} disabled={isLoading} sx={{ borderRadius: 2, fontWeight: 700 }}>
@@ -230,21 +293,103 @@ export function SpaTabMisAsistencias({ userId }: SpaTabMisAsistenciasProps) {
                       </Box>
                     </Stack>
 
-                    <Chip
-                      size="small"
-                      icon={isCompleted ? <CheckCircleIcon /> : <PendingActionsIcon />}
-                      label={isCompleted ? "Completada" : "Pendiente"}
-                      color={isCompleted ? "success" : "warning"}
-                      variant="outlined"
-                      sx={{ fontWeight: 700 }}
-                    />
+                    <Stack spacing={1} alignItems="flex-end">
+                      <Chip
+                        size="small"
+                        icon={isCompleted ? <CheckCircleIcon /> : <PendingActionsIcon />}
+                        label={isCompleted ? "Completada" : "Pendiente"}
+                        color={isCompleted ? "success" : "warning"}
+                        variant="outlined"
+                        sx={{ fontWeight: 700 }}
+                      />
+                      {isCompleted && (
+                        <Button
+                          size="small"
+                          variant="text"
+                          startIcon={<EditNoteIcon />}
+                          onClick={() => openReportDialog(m)}
+                          sx={{ 
+                            fontWeight: 700, 
+                            textTransform: "none",
+                            color: m.minutosReportados ? "primary.main" : "text.secondary"
+                          }}
+                        >
+                          {isDocente ? "Ajustar Duración" : (m.minutosReportados ? "Ajustar Reporte" : "Informar Duración")}
+                        </Button>
+                      )}
+                    </Stack>
                   </Stack>
+                  {!isDocente && m.comentariosReporte && (
+                    <Box sx={{ mt: 1, ml: 8, p: 1, borderRadius: 1.5, bgcolor: alpha(theme.palette.text.primary, 0.03), borderLeft: "3px solid", borderLeftColor: "divider" }}>
+                      <Typography variant="caption" sx={{ display: "flex", alignItems: "center", gap: 0.5, fontWeight: 600, color: "text.secondary" }}>
+                        <CommentIcon sx={{ fontSize: 14 }} /> Reportado: {formatMinutesAsHHMM(m.minutosReportados || 0)} - {m.comentariosReporte}
+                      </Typography>
+                    </Box>
+                  )}
+                  {isDocente && m.minutosReportados && (
+                     <Box sx={{ mt: 1, ml: 8, p: 1, borderRadius: 1.5, bgcolor: alpha(theme.palette.warning.main, 0.05), borderLeft: "3px solid", borderLeftColor: "warning.main" }}>
+                        <Typography variant="caption" sx={{ display: "flex", alignItems: "center", gap: 0.5, fontWeight: 700, color: "warning.dark" }}>
+                          <HistoryEduIcon sx={{ fontSize: 14 }} /> El asistente reportó {formatMinutesAsHHMM(m.minutosReportados)}: "{m.comentariosReporte}"
+                        </Typography>
+                     </Box>
+                  )}
                 </CardContent>
               </Card>
             );
           })}
         </Stack>
       )}
+
+      <Dialog open={reportDialogOpen} onClose={closeReportDialog} fullWidth maxWidth="xs">
+        <DialogTitle sx={{ fontWeight: 800 }}>{isDocente ? "Ajustar Duración Real" : "Reportar Duración Real"}</DialogTitle>
+        <DialogContent>
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
+            {isDocente 
+              ? "Como docente responsable, puedes ajustar la duración real de la reunión si ésta difirió de lo programado."
+              : "Informa a administración si la reunión duró más o menos tiempo de lo programado. Esto ayudará a realizar los ajustes correspondientes en la liquidación."
+            }
+          </Typography>
+          
+          <Stack spacing={3}>
+            <TextField
+              label="Duración Real"
+              fullWidth
+              required
+              type="number"
+              value={reportForm.minutos}
+              onChange={(e) => setReportForm(prev => ({ ...prev, minutos: e.target.value }))}
+              InputProps={{
+                endAdornment: <InputAdornment position="end">minutos</InputAdornment>,
+              }}
+              helperText={`Programado: ${formatMinutesAsHHMM(selectedMeetingForReport?.minutos || 0)}`}
+              disabled={isSubmittingReport}
+            />
+            {!isDocente && (
+              <TextField
+                label="Comentarios / Observaciones"
+                fullWidth
+                multiline
+                rows={3}
+                value={reportForm.comentarios}
+                onChange={(e) => setReportForm(prev => ({ ...prev, comentarios: e.target.value }))}
+                placeholder="Ej: La reunión se extendió 15 min por dudas finales."
+                disabled={isSubmittingReport}
+              />
+            )}
+          </Stack>
+        </DialogContent>
+        <DialogActions sx={{ px: 3, pb: 3 }}>
+          <Button onClick={closeReportDialog} disabled={isSubmittingReport}>Cancelar</Button>
+          <Button 
+            variant="contained" 
+            onClick={handleSubmitReport} 
+            disabled={isSubmittingReport || !reportForm.minutos}
+            sx={{ fontWeight: 700, px: 3 }}
+          >
+            {isDocente ? "Actualizar" : "Enviar Reporte"}
+          </Button>
+        </DialogActions>
+      </Dialog>
     </Box>
   );
 }

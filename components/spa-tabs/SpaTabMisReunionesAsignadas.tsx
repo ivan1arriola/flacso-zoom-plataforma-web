@@ -31,12 +31,18 @@ import VisibilityOffIcon from "@mui/icons-material/VisibilityOff";
 import KeyIcon from "@mui/icons-material/Key";
 import LinkIcon from "@mui/icons-material/Link";
 import WarningAmberRoundedIcon from "@mui/icons-material/WarningAmberRounded";
+import EditNoteIcon from "@mui/icons-material/EditNote";
+import CommentIcon from "@mui/icons-material/Comment";
+import HistoryEduIcon from "@mui/icons-material/HistoryEdu";
 
 import {
   loadPersonHours,
   loadZoomAccountPassword,
   type PersonHoursMeeting
 } from "@/src/services/tarifasApi";
+import { reportMeetingDuration } from "@/src/services/agendaApi";
+import { updatePastMeeting } from "@/src/services/solicitudesApi";
+import { Dialog, DialogTitle, DialogContent, DialogActions, TextField, InputAdornment } from "@mui/material";
 import { syncUpcomingMeetingsToGoogleCalendar } from "@/src/services/userApi";
 
 interface SpaTabMisReunionesAsignadasProps {
@@ -167,6 +173,11 @@ export function SpaTabMisReunionesAsignadas({ userId, role }: SpaTabMisReuniones
   const [passwordLoading, setPasswordLoading] = useState<Record<string, boolean>>({});
   const [showPasswords, setShowPasswords] = useState<Record<string, boolean>>({});
   const [copyFeedback, setCopyFeedback] = useState<Record<string, string>>({});
+  const [reportDialogOpen, setReportDialogOpen] = useState(false);
+  const [selectedMeetingForReport, setSelectedMeetingForReport] = useState<PersonHoursMeeting | null>(null);
+  const [reportForm, setReportForm] = useState({ minutos: "", comentarios: "" });
+  const [isSubmittingReport, setIsSubmittingReport] = useState(false);
+  const isDocente = role === "DOCENTE";
   const syncTimeoutRef = useRef<number | null>(null);
   const syncInFlightRef = useRef(false);
   const lastSyncedSignatureRef = useRef("");
@@ -211,6 +222,64 @@ export function SpaTabMisReunionesAsignadas({ userId, role }: SpaTabMisReuniones
       setError("Error al cargar las reuniones.");
     } finally {
       setIsLoading(false);
+    }
+  }
+
+  function formatMinutesAsHHMM(totalMinutes: number): string {
+    const normalizedMinutes = Math.max(0, Math.round(totalMinutes));
+    const hours = Math.floor(normalizedMinutes / 60);
+    const minutes = normalizedMinutes % 60;
+    return `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}`;
+  }
+
+  function openReportDialog(meeting: PersonHoursMeeting) {
+    setSelectedMeetingForReport(meeting);
+    setReportForm({
+      minutos: String(meeting.minutosReportados || meeting.minutos),
+      comentarios: meeting.comentariosReporte || ""
+    });
+    setReportDialogOpen(true);
+  }
+
+  function closeReportDialog() {
+    setReportDialogOpen(false);
+    setSelectedMeetingForReport(null);
+  }
+
+  async function handleSubmitReport() {
+    if (!selectedMeetingForReport) return;
+    const mins = parseInt(reportForm.minutos);
+    if (isNaN(mins) || mins <= 0) return;
+
+    setIsSubmittingReport(true);
+    try {
+      if (isDocente) {
+        const success = await updatePastMeeting({
+          eventoId: selectedMeetingForReport.eventId,
+          minutosReales: mins
+        });
+        if (success) {
+          void refresh();
+          closeReportDialog();
+        } else {
+          alert("No se pudo actualizar la duración.");
+        }
+      } else {
+        const res = await reportMeetingDuration(selectedMeetingForReport.eventId, {
+          minutosReportados: mins,
+          comentariosReporte: reportForm.comentarios.trim() || undefined
+        });
+        if (res.success) {
+          void refresh();
+          closeReportDialog();
+        } else {
+          alert(res.error || "No se pudo enviar el reporte.");
+        }
+      }
+    } catch {
+      alert("Error al procesar el cambio.");
+    } finally {
+      setIsSubmittingReport(false);
     }
   }
 
@@ -611,8 +680,25 @@ export function SpaTabMisReunionesAsignadas({ userId, role }: SpaTabMisReuniones
                           <Typography variant="caption" color="text.secondary" sx={{ textAlign: "center", fontWeight: 500 }}>
                             Se sincroniza automáticamente. Usa este acceso para revisarla en Google.
                           </Typography>
+                          
+                          <Button
+                            fullWidth
+                            variant="outlined"
+                            startIcon={<EditNoteIcon />}
+                            onClick={() => openReportDialog(m)}
+                            sx={{ borderRadius: 3, fontWeight: 700, textTransform: "none" }}
+                          >
+                            {isDocente ? "Ajustar Duración" : (m.minutosReportados ? "Ajustar Reporte" : "Informar Duración")}
+                          </Button>
                         </Box>
                       </Stack>
+                      {!isDocente && m.comentariosReporte && (
+                        <Box sx={{ mt: 2, p: 1.5, borderRadius: 2, bgcolor: alpha(theme.palette.text.primary, 0.03), borderLeft: "4px solid", borderLeftColor: "divider" }}>
+                          <Typography variant="caption" sx={{ display: "flex", alignItems: "center", gap: 0.5, fontWeight: 600, color: "text.secondary" }}>
+                            <CommentIcon sx={{ fontSize: 14 }} /> Reportado: {formatMinutesAsHHMM(m.minutosReportados || 0)} - {m.comentariosReporte}
+                          </Typography>
+                        </Box>
+                      )}
                     </Paper>
                   );
                 })}
@@ -621,6 +707,56 @@ export function SpaTabMisReunionesAsignadas({ userId, role }: SpaTabMisReuniones
           ))}
         </Stack>
       )}
+      <Dialog open={reportDialogOpen} onClose={closeReportDialog} fullWidth maxWidth="xs">
+        <DialogTitle sx={{ fontWeight: 800 }}>{isDocente ? "Ajustar Duración Real" : "Reportar Duración Real"}</DialogTitle>
+        <DialogContent>
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
+            {isDocente 
+              ? "Como docente responsable, puedes ajustar la duración real de la reunión si ésta difirió de lo programado."
+              : "Informa a administración si la reunión duró más o menos tiempo de lo programado. Esto ayudará a realizar los ajustes correspondientes en la liquidación."
+            }
+          </Typography>
+          
+          <Stack spacing={3}>
+            <TextField
+              label="Duración Real"
+              fullWidth
+              required
+              type="number"
+              value={reportForm.minutos}
+              onChange={(e) => setReportForm(prev => ({ ...prev, minutos: e.target.value }))}
+              InputProps={{
+                endAdornment: <InputAdornment position="end">minutos</InputAdornment>,
+              }}
+              helperText={`Programado: ${formatMinutesAsHHMM(selectedMeetingForReport?.minutos || 0)}`}
+              disabled={isSubmittingReport}
+            />
+            {!isDocente && (
+              <TextField
+                label="Comentarios / Observaciones"
+                fullWidth
+                multiline
+                rows={3}
+                value={reportForm.comentarios}
+                onChange={(e) => setReportForm(prev => ({ ...prev, comentarios: e.target.value }))}
+                placeholder="Ej: La reunión se extendió 15 min por dudas finales."
+                disabled={isSubmittingReport}
+              />
+            )}
+          </Stack>
+        </DialogContent>
+        <DialogActions sx={{ px: 3, pb: 3 }}>
+          <Button onClick={closeReportDialog} disabled={isSubmittingReport}>Cancelar</Button>
+          <Button 
+            variant="contained" 
+            onClick={handleSubmitReport} 
+            disabled={isSubmittingReport || !reportForm.minutos}
+            sx={{ fontWeight: 700, px: 3 }}
+          >
+            {isDocente ? "Actualizar" : "Enviar Reporte"}
+          </Button>
+        </DialogActions>
+      </Dialog>
     </Box>
   );
 }

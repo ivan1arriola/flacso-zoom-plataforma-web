@@ -25,6 +25,8 @@ import { formatDateTime } from "@/src/lib/spa-home/recurrence";
 import type { PastMeeting } from "@/src/services/solicitudesApi";
 import { MeetingAssistantStatusChip } from "@/components/spa-tabs/MeetingAssistantStatusChip";
 import { ZoomAccountPasswordField } from "@/components/spa-tabs/ZoomAccountPasswordField";
+import CommentIcon from "@mui/icons-material/Comment";
+import HistoryEduIcon from "@mui/icons-material/HistoryEdu";
 
 interface PastMeetingForm {
   titulo: string;
@@ -230,7 +232,23 @@ export function SpaTabHistorico({
                           </Typography>
                           <Stack direction="row" spacing={0.8} useFlexGap flexWrap="wrap" sx={{ mt: 0.6 }}>
                             <Chip size="small" variant="outlined" label={meeting.modalidadReunion} />
-                            <Chip size="small" variant="outlined" label={`${meeting.minutosReales} min`} />
+                            <Chip 
+                              size="small" 
+                              variant={meeting.minutosReportados ? "filled" : "outlined"} 
+                              color={meeting.minutosReportados && meeting.minutosReportados !== meeting.minutosReales ? "warning" : "default"}
+                              label={`${meeting.minutosReales} min`} 
+                              sx={{ fontWeight: 700 }}
+                            />
+                            {meeting.minutosReportados && (
+                              <Chip 
+                                size="small" 
+                                variant="outlined" 
+                                color="info"
+                                icon={<HistoryEduIcon style={{ fontSize: 14 }} />}
+                                label={`Reportado: ${meeting.minutosReportados} min`} 
+                                sx={{ fontWeight: 700 }}
+                              />
+                            )}
                             <Chip
                               size="small"
                               color={recurringCount > 1 ? "primary" : "default"}
@@ -379,6 +397,18 @@ export function SpaTabHistorico({
                           </Typography>
                           <Typography variant="body2">{formatDateTime(meeting.finAt)}</Typography>
                         </Box>
+                        {meeting.comentariosReporte && (
+                          <Box sx={{ gridColumn: "1 / -1", mt: 1 }}>
+                            <Paper variant="outlined" sx={{ p: 1, bgcolor: alpha(theme.palette.info.main, 0.05), borderLeft: "4px solid", borderLeftColor: "info.main" }}>
+                              <Typography variant="caption" sx={{ fontWeight: 800, color: "info.dark", display: "flex", alignItems: "center", gap: 0.5, mb: 0.5 }}>
+                                <CommentIcon sx={{ fontSize: 14 }} /> COMENTARIO DEL ASISTENTE:
+                              </Typography>
+                              <Typography variant="body2" sx={{ fontStyle: "italic" }}>
+                                "{meeting.comentariosReporte}"
+                              </Typography>
+                            </Paper>
+                          </Box>
+                        )}
                         <Box sx={{ gridColumn: { xs: "1 / -1", lg: "span 2" } }}>
                           <ZoomAccountPasswordField
                             hostAccount={hostAccount}

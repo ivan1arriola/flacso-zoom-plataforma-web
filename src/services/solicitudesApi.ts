@@ -59,6 +59,8 @@ export type PastMeeting = {
   inicioAt: string;
   finAt: string;
   minutosReales: number;
+  minutosReportados?: number | null;
+  comentariosReporte?: string | null;
   estadoEvento: string;
   estadoEjecucion: string;
   docenteNombre: string;

@@ -191,6 +191,8 @@ model EventoZoom {
   inicioRealAt         DateTime?
   finRealAt            DateTime?
   minutosReales        Int?
+  minutosReportados    Int?
+  comentariosReporte   String?
   estadoEjecucion      EstadoEjecucionEvento  @default(NO_INICIADO)
   costoEstimado        Decimal?               @db.Decimal(12, 2)
   costoReal            Decimal?               @db.Decimal(12, 2)
