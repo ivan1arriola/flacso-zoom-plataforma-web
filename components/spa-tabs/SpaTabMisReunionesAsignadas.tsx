@@ -212,7 +212,7 @@ export function SpaTabMisReunionesAsignadas({ userId, role }: SpaTabMisReuniones
         modalidadReunion: newModality
       });
       
-      if (res.ok) {
+      if (res.success) {
         void refresh();
       } else {
         alert(res.error || "No se pudo cambiar la modalidad.");

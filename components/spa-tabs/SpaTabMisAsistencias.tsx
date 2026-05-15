@@ -25,6 +25,7 @@ import CheckCircleIcon from "@mui/icons-material/CheckCircle";
 import PendingActionsIcon from "@mui/icons-material/PendingActions";
 import EditNoteIcon from "@mui/icons-material/EditNote";
 import CommentIcon from "@mui/icons-material/Comment";
+import HistoryEduIcon from "@mui/icons-material/HistoryEdu";
 
 import { loadPersonHours, type PersonHoursMeeting } from "@/src/services/tarifasApi";
 import { reportMeetingDuration } from "@/src/services/agendaApi";

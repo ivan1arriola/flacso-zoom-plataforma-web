@@ -29,6 +29,7 @@ export type Solicitud = {
     startTime: string;
     endTime?: string;
     durationMinutes: number;
+    modalidadReunion?: string | null;
     estadoEvento?: string | null;
     estadoCobertura?: string | null;
     status?: string | null;

@@ -6091,11 +6091,17 @@ export class SalasService {
     if (!event) throw new Error("Evento no encontrado.");
     
     // Si no es admin/contaduria, verificar que sea el asistente asignado
-    const canManageDirectly = [UserRole.ADMINISTRADOR, UserRole.CONTADURIA].includes(user.role);
+    const canManageDirectlyRoles: UserRole[] = [UserRole.ADMINISTRADOR, UserRole.CONTADURIA];
+    const canManageDirectly = canManageDirectlyRoles.includes(user.role);
     if (!canManageDirectly) {
-      const isAssigned = event.asignaciones.some(a => a.asistenteZoomId === user.id || a.asistenteZoomId === user.asistenteProfileId);
-      // Nota: usualmente user.id es el usuarioId, pero user.asistenteProfileId podria ser necesario segun como este el session user.
-      // Vamos a verificar como se identifica al asistente.
+      const assistantProfile = await db.asistenteZoom.findUnique({
+        where: { usuarioId: user.id },
+        select: { id: true }
+      });
+      const assistantProfileId = assistantProfile?.id ?? null;
+      const isAssigned = assistantProfileId
+        ? event.asignaciones.some((assignment) => assignment.asistenteZoomId === assistantProfileId)
+        : false;
       if (!isAssigned) {
         throw new Error("No tienes permisos para reportar en esta reunion.");
       }

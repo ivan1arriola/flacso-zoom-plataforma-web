@@ -399,7 +399,7 @@ export function SpaTabHistorico({
                         </Box>
                         {meeting.comentariosReporte && (
                           <Box sx={{ gridColumn: "1 / -1", mt: 1 }}>
-                            <Paper variant="outlined" sx={{ p: 1, bgcolor: alpha(theme.palette.info.main, 0.05), borderLeft: "4px solid", borderLeftColor: "info.main" }}>
+                            <Paper variant="outlined" sx={{ p: 1, bgcolor: (theme) => alpha(theme.palette.info.main, 0.05), borderLeft: "4px solid", borderLeftColor: "info.main" }}>
                               <Typography variant="caption" sx={{ fontWeight: 800, color: "info.dark", display: "flex", alignItems: "center", gap: 0.5, mb: 0.5 }}>
                                 <CommentIcon sx={{ fontSize: 14 }} /> COMENTARIO DEL ASISTENTE:
                               </Typography>
