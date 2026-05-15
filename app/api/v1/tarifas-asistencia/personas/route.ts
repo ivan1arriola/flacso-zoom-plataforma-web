@@ -10,7 +10,9 @@ export async function GET(request: Request) {
     const user = await getSessionUser();
     if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-    const isAssistant = user.role === UserRole.ASISTENTE_ZOOM;
+    const isAssistant =
+      user.role === UserRole.ASISTENTE_ZOOM ||
+      user.role === UserRole.SOPORTE_ZOOM;
     const isDocente = user.role === UserRole.DOCENTE;
     const canAccess =
       user.role === UserRole.ADMINISTRADOR ||

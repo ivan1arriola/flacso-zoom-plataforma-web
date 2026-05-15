@@ -76,6 +76,7 @@ type ZoomOccurrenceSnapshot = {
   startTime: string;
   endTime?: string;
   durationMinutes: number;
+  minutosReales?: number | null;
   estadoEvento?: string | null;
   estadoCobertura?: string | null;
   status: string | null;
@@ -2083,7 +2084,7 @@ async function ensureAssistantProfilesForEligibleRoles() {
 }
 
 function assertAssistantEligibleRole(user: SessionUser) {
-  if (user.role !== UserRole.ASISTENTE_ZOOM && user.role !== UserRole.ADMINISTRADOR) {
+  if (!LEGACY_ASSISTANT_ROLES.includes(user.role) && user.role !== UserRole.ADMINISTRADOR) {
     throw new Error("Solo asistentes Zoom o administradores pueden operar como asistentes.");
   }
 }
@@ -3427,9 +3428,17 @@ export class SalasLegacyService {
     const now = new Date();
 
     if (user.role === UserRole.ADMINISTRADOR) {
+      const immediateWindowEnd = new Date(now.getTime() + 2 * 24 * 60 * 60_000);
       const criticalWindowEnd = new Date(now.getTime() + 7 * 24 * 60 * 60_000);
+      const monthStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1, 0, 0, 0, 0));
+      const nextMonthStart = new Date(
+        Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1, 0, 0, 0, 0)
+      );
       const [
         solicitudesTotales,
+        solicitudesActivas,
+        proximasReuniones,
+        personasActivasMes,
         manualPendings,
         solicitudesNoResueltas,
         eventosSinCobertura,
@@ -3440,6 +3449,47 @@ export class SalasLegacyService {
       ] =
         await Promise.all([
           db.solicitudSala.count(),
+          db.solicitudSala.count({
+            where: {
+              estadoSolicitud: {
+                notIn: [
+                  EstadoSolicitudSala.CANCELADA_ADMIN,
+                  EstadoSolicitudSala.CANCELADA_DOCENTE
+                ]
+              }
+            }
+          }),
+          db.eventoZoom.count({
+            where: {
+              inicioProgramadoAt: {
+                gte: now,
+                lt: immediateWindowEnd
+              },
+              estadoEvento: {
+                notIn: [EstadoEventoZoom.CANCELADO, EstadoEventoZoom.FINALIZADO]
+              }
+            }
+          }),
+          db.asignacionAsistente
+            .groupBy({
+              by: ["asistenteZoomId"],
+              where: {
+                tipoAsignacion: TipoAsignacionAsistente.PRINCIPAL,
+                estadoAsignacion: {
+                  in: [EstadoAsignacion.ASIGNADO, EstadoAsignacion.ACEPTADO]
+                },
+                evento: {
+                  requiereAsistencia: true,
+                  estadoEjecucion: EstadoEjecucionEvento.EJECUTADO,
+                  estadoEvento: { not: EstadoEventoZoom.CANCELADO },
+                  inicioProgramadoAt: {
+                    gte: monthStart,
+                    lt: nextMonthStart
+                  }
+                }
+              }
+            })
+            .then((rows) => rows.length),
           db.solicitudSala.count({
             where: { estadoSolicitud: EstadoSolicitudSala.PENDIENTE_RESOLUCION_MANUAL_ID }
           }),
@@ -3566,6 +3616,9 @@ export class SalasLegacyService {
       return {
         scope: UserRole.ADMINISTRADOR,
         solicitudesTotales,
+        solicitudesActivas,
+        proximasReuniones,
+        personasActivasMes,
         manualPendings,
         solicitudesNoResueltas,
         colisionesZoom7d,
@@ -3744,8 +3797,16 @@ export class SalasLegacyService {
       };
     }
 
-    if (user.role === UserRole.ASISTENTE_ZOOM) {
+    if (LEGACY_ASSISTANT_ROLES.includes(user.role)) {
       const assistant = await getOrCreateAsistente(user);
+      const openAgendaWhere = {
+        requiereAsistencia: true,
+        estadoCobertura: EstadoCoberturaSoporte.REQUERIDO_SIN_ASIGNAR,
+        agendaAbiertaAt: { not: null },
+        agendaCierraAt: { gt: now },
+        inicioProgramadoAt: { gte: now },
+        estadoEvento: { not: EstadoEventoZoom.CANCELADO }
+      } as const;
       const monthStart = new Date(
         Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1, 0, 0, 0, 0)
       );
@@ -3756,16 +3817,32 @@ export class SalasLegacyService {
         Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 1, 1, 0, 0, 0, 0)
       );
 
-      const [agendaDisponible, misPostulaciones, misAsignacionesProximas, executedAssignments] =
+      const [
+        agendaDisponible,
+        misPendientesAgenda,
+        misRespuestasAgenda,
+        misPostulaciones,
+        misAsignacionesProximas,
+        executedAssignments
+      ] =
         await Promise.all([
           db.eventoZoom.count({
+            where: openAgendaWhere
+          }),
+          db.eventoZoom.count({
             where: {
-              requiereAsistencia: true,
-              estadoCobertura: EstadoCoberturaSoporte.REQUERIDO_SIN_ASIGNAR,
-              agendaAbiertaAt: { not: null },
-              agendaCierraAt: { gt: now },
-              inicioProgramadoAt: { gte: now },
-              estadoEvento: { not: EstadoEventoZoom.CANCELADO }
+              ...openAgendaWhere,
+              intereses: {
+                none: {
+                  asistenteZoomId: assistant.id
+                }
+              }
+            }
+          }),
+          db.interesAsistenteEvento.count({
+            where: {
+              asistenteZoomId: assistant.id,
+              evento: openAgendaWhere
             }
           }),
           db.interesAsistenteEvento.count({
@@ -3877,6 +3954,8 @@ export class SalasLegacyService {
       return {
         scope: UserRole.ASISTENTE_ZOOM,
         agendaDisponible,
+        misPendientesAgenda,
+        misRespuestasAgenda,
         misPostulaciones,
         misAsignacionesProximas,
         misHorasMes,
@@ -4077,6 +4156,7 @@ export class SalasLegacyService {
             id: true,
             inicioProgramadoAt: true,
             finProgramadoAt: true,
+            minutosReales: true,
             estadoEvento: true,
             estadoCobertura: true,
             requiereAsistencia: true,
@@ -4172,6 +4252,7 @@ export class SalasLegacyService {
             1,
             Math.floor((event.finProgramadoAt.getTime() - event.inicioProgramadoAt.getTime()) / 60000)
           ),
+          minutosReales: event.minutosReales ?? null,
           estadoEvento: event.estadoEvento,
           estadoCobertura: event.estadoCobertura,
           status: null,
@@ -4203,6 +4284,7 @@ export class SalasLegacyService {
                 1,
                 Math.floor((solicitud.fechaFinSolicitada.getTime() - solicitud.fechaInicioSolicitada.getTime()) / 60000)
               ),
+              minutosReales: null,
               estadoEvento: null,
               estadoCobertura: null,
               status: null,
@@ -4261,6 +4343,7 @@ export class SalasLegacyService {
               60_000
             ).toISOString(),
           durationMinutes: Math.max(1, snapshotInstance.durationMinutes || matchedFallback?.durationMinutes || 60),
+          minutosReales: matchedFallback?.minutosReales ?? null,
           estadoEvento: matchedFallback?.estadoEvento ?? null,
           estadoCobertura: matchedFallback?.estadoCobertura ?? null,
           status: snapshotInstance.status ?? matchedFallback?.status ?? null,
@@ -9552,17 +9635,24 @@ export class SalasLegacyService {
     });
 
     if (!event) throw new Error("Evento no encontrado.");
-    if (
-      event.estadoEvento === EstadoEventoZoom.CANCELADO ||
-      event.estadoEvento === EstadoEventoZoom.FINALIZADO
-    ) {
-      throw new Error("No se puede editar una reunion cancelada o finalizada.");
-    }
-    if (event.finProgramadoAt <= new Date()) {
-      throw new Error("Solo se pueden editar reuniones pendientes.");
+    const canManageAsAdmin = user.role === UserRole.ADMINISTRADOR;
+    const now = new Date();
+    const isPastOrClosedEvent =
+      event.finProgramadoAt <= now ||
+      event.estadoEvento === EstadoEventoZoom.FINALIZADO ||
+      event.estadoEvento === EstadoEventoZoom.CANCELADO;
+    if (!canManageAsAdmin) {
+      if (
+        event.estadoEvento === EstadoEventoZoom.CANCELADO ||
+        event.estadoEvento === EstadoEventoZoom.FINALIZADO
+      ) {
+        throw new Error("No se puede editar una reunion cancelada o finalizada.");
+      }
+      if (event.finProgramadoAt <= now) {
+        throw new Error("Solo se pueden editar reuniones pendientes.");
+      }
     }
 
-    const canManageAsAdmin = user.role === UserRole.ADMINISTRADOR;
     const isOwner =
       event.solicitud.createdByUserId === user.id || event.solicitud.docente.usuarioId === user.id;
     if (!canManageAsAdmin && !isOwner) {
@@ -9621,9 +9711,10 @@ export class SalasLegacyService {
     if (nextEnd <= nextStart) {
       throw new Error("finProgramadoAt debe ser mayor que inicioProgramadoAt.");
     }
-    if (nextEnd <= new Date()) {
+    if (!canManageAsAdmin && nextEnd <= now) {
       throw new Error("La reunion debe quedar programada a futuro.");
     }
+    const isPastOrClosedTarget = isPastOrClosedEvent || nextEnd <= now;
 
     const nextTimezone =
       hasTimezoneInput && (input.timezone ?? "").trim().length > 0
@@ -9694,7 +9785,7 @@ export class SalasLegacyService {
     const assignedAssistantIds = Array.from(
       new Set(event.asignaciones.map((assignment) => assignment.asistenteZoomId))
     );
-    if (scheduleChanged && assignedAssistantIds.length > 0) {
+    if (scheduleChanged && assignedAssistantIds.length > 0 && !(canManageAsAdmin && isPastOrClosedTarget)) {
       const overlappingAssignments = await db.asignacionAsistente.findMany({
         where: {
           eventoZoomId: { not: eventoId },
@@ -9754,7 +9845,9 @@ export class SalasLegacyService {
 
     const dedicatedMeetingId = normalizeZoomMeetingId(event.zoomMeetingId);
     const primaryMeetingId = normalizeZoomMeetingId(event.solicitud.meetingPrincipalId);
-    const shouldSyncZoom = titleChanged || descriptionChanged || scheduleChanged;
+    const shouldSyncZoom =
+      (titleChanged || descriptionChanged || scheduleChanged) &&
+      !(canManageAsAdmin && isPastOrClosedTarget);
 
     if (shouldSyncZoom) {
       const targetMeetingId = dedicatedMeetingId ?? primaryMeetingId;

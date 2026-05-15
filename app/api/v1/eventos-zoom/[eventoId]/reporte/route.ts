@@ -18,7 +18,12 @@ export async function POST(request: Request, context: Params) {
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   // Roles permitidos para reportar
-  const allowedRoles: UserRole[] = [UserRole.ADMINISTRADOR, UserRole.CONTADURIA, UserRole.ASISTENTE_ZOOM];
+  const allowedRoles: UserRole[] = [
+    UserRole.ADMINISTRADOR,
+    UserRole.CONTADURIA,
+    UserRole.ASISTENTE_ZOOM,
+    UserRole.SOPORTE_ZOOM
+  ];
   if (!allowedRoles.includes(user.role)) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }

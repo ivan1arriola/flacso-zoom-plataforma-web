@@ -42,6 +42,7 @@ import {
   Paper,
   Stack,
   TextField,
+  InputAdornment,
   Typography,
   Skeleton
 } from "@mui/material";
@@ -114,6 +115,14 @@ interface SpaTabSolicitudesProps {
     finProgramadoAt?: string;
     modalidadReunion?: string;
   }) => Promise<boolean>;
+  canEditMeetingDuration: boolean;
+  updatingMeetingDurationEventId: string | null;
+  onEditMeetingDuration: (input: {
+    eventoId: string;
+    titulo: string;
+    inicioProgramadoAt: string;
+    minutosReales: number;
+  }) => Promise<boolean>;
   canReassignRecurringSolicitud: boolean;
   onReassignRecurringSolicitud: (input: {
     solicitudId: string;
@@ -161,6 +170,15 @@ type EditMeetingDialogState = {
   titulo: string;
   eventoId: string;
   isRecurring: boolean;
+};
+
+type EditMeetingDurationDialogState = {
+  eventoId: string;
+  titulo: string;
+  inicioProgramadoAt: string;
+  fechaLabel: string;
+  minutosProgramados: number;
+  minutosRealesActuales?: number | null;
 };
 
 type EditMeetingFormState = {
@@ -526,6 +544,9 @@ export function SpaTabSolicitudes({
   onSendReminder,
   canEditMeeting,
   onEditMeeting,
+  canEditMeetingDuration,
+  updatingMeetingDurationEventId,
+  onEditMeetingDuration,
   canReassignRecurringSolicitud,
   onReassignRecurringSolicitud,
   canEditAssistance,
@@ -590,12 +611,36 @@ export function SpaTabSolicitudes({
   const [editMeetingDialogSolicitud, setEditMeetingDialogSolicitud] = useState<EditMeetingDialogState | null>(null);
   const [editMeetingForm, setEditMeetingForm] = useState<EditMeetingFormState>(buildEmptyEditMeetingForm);
   const [isSubmittingEditMeeting, setIsSubmittingEditMeeting] = useState(false);
+  const [editMeetingDurationDialog, setEditMeetingDurationDialog] = useState<EditMeetingDurationDialogState | null>(null);
+  const [editMeetingDurationMinutes, setEditMeetingDurationMinutes] = useState("");
   const [addInstanceDialogSolicitud, setAddInstanceDialogSolicitud] = useState<{
     id: string;
     titulo: string;
   } | null>(null);
   const [addInstanceStartLocal, setAddInstanceStartLocal] = useState("");
   const [addInstanceEndLocal, setAddInstanceEndLocal] = useState("");
+  const [addInstanceBusyIndex, setAddInstanceBusyIndex] = useState(0);
+  const isSubmittingAddInstance = Boolean(
+    addInstanceDialogSolicitud &&
+    addingInstanceSolicitudId === addInstanceDialogSolicitud.id
+  );
+  const addInstanceBusyLabel =
+    ADD_INSTANCE_BUSY_MESSAGES[addInstanceBusyIndex] ?? ADD_INSTANCE_BUSY_MESSAGES[0];
+
+  useEffect(() => {
+    setAddInstanceBusyIndex(0);
+    if (!isSubmittingAddInstance) return;
+    if (ADD_INSTANCE_BUSY_MESSAGES.length <= 1) return;
+
+    const intervalId = window.setInterval(() => {
+      setAddInstanceBusyIndex((prev) => (prev + 1) % ADD_INSTANCE_BUSY_MESSAGES.length);
+    }, 1800);
+
+    return () => {
+      window.clearInterval(intervalId);
+    };
+  }, [isSubmittingAddInstance]);
+
   const specificDateDetails = useMemo(
     () => parseSpecificDateDetails(form.fechasEspecificasDetalle),
     [form.fechasEspecificasDetalle]
@@ -861,6 +906,60 @@ export function SpaTabSolicitudes({
       }
     } finally {
       setIsSubmittingEditMeeting(false);
+    }
+  }
+
+  function openEditMeetingDurationDialog(
+    solicitud: Pick<Solicitud, "titulo">,
+    instance: NonNullable<Solicitud["zoomInstances"]>[number]
+  ) {
+    const eventId = (instance.eventId ?? "").trim();
+    if (!eventId) return;
+
+    const minProgramados = Math.max(1, Math.floor(instance.durationMinutes || 0));
+    const minActuales =
+      typeof instance.minutosReales === "number" && Number.isFinite(instance.minutosReales) && instance.minutosReales > 0
+        ? Math.floor(instance.minutosReales)
+        : null;
+    const defaultMinutes = minActuales ?? minProgramados;
+
+    setEditMeetingDurationDialog({
+      eventoId: eventId,
+      titulo: solicitud.titulo,
+      inicioProgramadoAt: instance.startTime,
+      fechaLabel: formatFullInstanceDateTime(instance),
+      minutosProgramados: minProgramados,
+      minutosRealesActuales: minActuales
+    });
+    setEditMeetingDurationMinutes(String(defaultMinutes));
+  }
+
+  function closeEditMeetingDurationDialog() {
+    if (
+      editMeetingDurationDialog &&
+      updatingMeetingDurationEventId === editMeetingDurationDialog.eventoId
+    ) {
+      return;
+    }
+    setEditMeetingDurationDialog(null);
+    setEditMeetingDurationMinutes("");
+  }
+
+  async function submitEditMeetingDurationDialog() {
+    if (!editMeetingDurationDialog) return;
+    const minutes = Number.parseInt(editMeetingDurationMinutes, 10);
+    if (!Number.isFinite(minutes) || minutes < 1 || minutes > 1440) return;
+
+    const success = await onEditMeetingDuration({
+      eventoId: editMeetingDurationDialog.eventoId,
+      titulo: editMeetingDurationDialog.titulo,
+      inicioProgramadoAt: editMeetingDurationDialog.inicioProgramadoAt,
+      minutosReales: minutes
+    });
+
+    if (success) {
+      setEditMeetingDurationDialog(null);
+      setEditMeetingDurationMinutes("");
     }
   }
 
@@ -1251,15 +1350,19 @@ export function SpaTabSolicitudes({
     let earliestAnyStartMs = Number.POSITIVE_INFINITY;
     let earliestNonCancelledStartMs = Number.POSITIVE_INFINITY;
     let earliestActiveOrUpcomingStartMs = Number.POSITIVE_INFINITY;
+    let latestAnyStartMs = Number.NEGATIVE_INFINITY;
+    let latestNonCancelledStartMs = Number.NEGATIVE_INFINITY;
 
     for (const instance of instances) {
       const parsedStart = new Date(instance.startTime).getTime();
       if (!Number.isFinite(parsedStart)) continue;
 
       earliestAnyStartMs = Math.min(earliestAnyStartMs, parsedStart);
+      latestAnyStartMs = Math.max(latestAnyStartMs, parsedStart);
 
       if (!isInstanceCancelledOrFinalizada(instance)) {
         earliestNonCancelledStartMs = Math.min(earliestNonCancelledStartMs, parsedStart);
+        latestNonCancelledStartMs = Math.max(latestNonCancelledStartMs, parsedStart);
       }
 
       if (isInstanceActiveOrUpcoming(instance, nowMs)) {
@@ -1269,6 +1372,12 @@ export function SpaTabSolicitudes({
 
     if (scope === "ACTIVAS" && Number.isFinite(earliestActiveOrUpcomingStartMs)) {
       return earliestActiveOrUpcomingStartMs;
+    }
+    if (scope === "FINALIZADAS" && Number.isFinite(latestNonCancelledStartMs)) {
+      return latestNonCancelledStartMs;
+    }
+    if (scope === "FINALIZADAS" && Number.isFinite(latestAnyStartMs)) {
+      return latestAnyStartMs;
     }
     if (Number.isFinite(earliestNonCancelledStartMs)) return earliestNonCancelledStartMs;
     if (Number.isFinite(earliestAnyStartMs)) return earliestAnyStartMs;
@@ -1297,7 +1406,11 @@ export function SpaTabSolicitudes({
 
       const leftStartMs = resolveSolicitudSortStartMs(left, solicitudesListScope, nowMs);
       const rightStartMs = resolveSolicitudSortStartMs(right, solicitudesListScope, nowMs);
-      if (leftStartMs !== rightStartMs) return leftStartMs - rightStartMs;
+      if (leftStartMs !== rightStartMs) {
+        return solicitudesListScope === "FINALIZADAS"
+          ? rightStartMs - leftStartMs
+          : leftStartMs - rightStartMs;
+      }
 
       const byTitle = left.titulo.localeCompare(right.titulo, "es", {
         sensitivity: "base",
@@ -1388,6 +1501,16 @@ export function SpaTabSolicitudes({
               Boolean(instance.requiereAsistencia) &&
               instance.estadoCobertura !== "NO_REQUIERE";
             const canManageAssistanceThisInstance = canEditAssistance && status.cancellable;
+            const instanceEndMs = resolveInstanceEndMs(instance);
+            const hasEndedByTime = instanceEndMs !== null && Number.isFinite(instanceEndMs) && instanceEndMs <= Date.now();
+            const isFinalizedInstance = instance.estadoEvento === "FINALIZADO";
+            const canOpenDurationEditor =
+              canEditMeetingDuration &&
+              Boolean(instance.eventId) &&
+              (hasEndedByTime || isFinalizedInstance) &&
+              !isInstanceCancelled;
+            const isSubmittingDurationThisInstance =
+              Boolean(instance.eventId) && updatingMeetingDurationEventId === instance.eventId;
 
             return (
               <Paper
@@ -1470,6 +1593,31 @@ export function SpaTabSolicitudes({
                           : "Pedir asistencia"}
                     </Button>
                   )}
+                  {canEditMeetingDuration ? (
+                    <Tooltip
+                      title={
+                        !instance.eventId
+                          ? "Esta fecha no tiene un evento interno para editar."
+                          : !hasEndedByTime && !isFinalizedInstance
+                            ? "La duración real se puede ajustar cuando la reunión finaliza."
+                            : "Editar la duración real de esta fecha."
+                      }
+                    >
+                      <span>
+                        <Button
+                          type="button"
+                          size="small"
+                          variant="outlined"
+                          color="secondary"
+                          startIcon={<AccessTimeOutlinedIcon fontSize="small" />}
+                          disabled={!canOpenDurationEditor || isSubmittingDurationThisInstance}
+                          onClick={() => openEditMeetingDurationDialog(item, instance)}
+                        >
+                          {isSubmittingDurationThisInstance ? "Guardando..." : "Ajustar duración"}
+                        </Button>
+                      </span>
+                    </Tooltip>
+                  ) : null}
                   {canCancelThisInstance && (
                     <Button
                       type="button"
@@ -1570,10 +1718,6 @@ export function SpaTabSolicitudes({
     addInstanceEndDate.getTime() > addInstanceStartDate.getTime()
   );
   const isAddInstanceRangeValid = isAddInstanceSameDay && isAddInstanceChronological;
-  const isSubmittingAddInstance = Boolean(
-    addInstanceDialogSolicitud &&
-    addingInstanceSolicitudId === addInstanceDialogSolicitud.id
-  );
   const requiresRecurringCreatorInEdit =
     Boolean(editMeetingDialogSolicitud?.isRecurring) && canReassignRecurringSolicitud;
   const isEditMeetingFormReady =
@@ -1582,26 +1726,10 @@ export function SpaTabSolicitudes({
     Boolean(editMeetingForm.programaNombre.trim()) &&
     (!canDelegateResponsable || Boolean(editMeetingForm.responsableNombre.trim())) &&
     (!requiresRecurringCreatorInEdit || Boolean(editMeetingForm.docenteCreadorNombre.trim()));
-  const [addInstanceBusyIndex, setAddInstanceBusyIndex] = useState(0);
-  const addInstanceBusyLabel =
-    ADD_INSTANCE_BUSY_MESSAGES[addInstanceBusyIndex] ?? ADD_INSTANCE_BUSY_MESSAGES[0];
+  const isAdminView = viewerRole === "ADMINISTRADOR";
   const isDocenteView = viewerRole === "DOCENTE";
   const listViewTitle = isDocenteView ? "Mis pedidos" : "Todos los pedidos";
   const listViewHeading = isDocenteView ? "Listado de mis pedidos" : "Listado de todos los pedidos";
-
-  useEffect(() => {
-    setAddInstanceBusyIndex(0);
-    if (!isSubmittingAddInstance) return;
-    if (ADD_INSTANCE_BUSY_MESSAGES.length <= 1) return;
-
-    const intervalId = window.setInterval(() => {
-      setAddInstanceBusyIndex((prev) => (prev + 1) % ADD_INSTANCE_BUSY_MESSAGES.length);
-    }, 1800);
-
-    return () => {
-      window.clearInterval(intervalId);
-    };
-  }, [isSubmittingAddInstance]);
 
   return (
     <Card variant="outlined" sx={{ borderRadius: 3 }}>
@@ -2743,13 +2871,22 @@ export function SpaTabSolicitudes({
                     !isSolicitudCancelled &&
                     (solicitudRequiresAssistance || hasEligibleInstanceForAssistance);
                   const isRecurringSolicitud = item.tipoInstancias !== "UNICA";
-                  const editableInstance =
+                  const nowMs = Date.now();
+                  const upcomingEditableInstance =
                     sortedInstances.find((instance) => {
                       if (!instance.eventId) return false;
                       const endAt = new Date(resolveInstanceEndIso(instance)).getTime();
-                      return Number.isFinite(endAt) && endAt > Date.now();
+                      return Number.isFinite(endAt) && endAt > nowMs;
                     }) ?? null;
-                  const showEditMeetingAction = canEditMeeting && !isSolicitudCancelled;
+                  const latestEditableInstance =
+                    [...sortedInstances]
+                      .reverse()
+                      .find((instance) => Boolean(instance.eventId)) ?? null;
+                  const editableInstance = isAdminView
+                    ? upcomingEditableInstance ?? latestEditableInstance
+                    : upcomingEditableInstance;
+                  const showEditMeetingAction =
+                    canEditMeeting && (!isSolicitudCancelled || isAdminView);
                   const showReassignRecurringAction =
                     canReassignRecurringSolicitud &&
                     isRecurringSolicitud &&
@@ -2858,9 +2995,11 @@ export function SpaTabSolicitudes({
                                   title={
                                     canEditSelectedMeeting
                                       ? isRecurringSolicitud
-                                        ? "Editar datos de toda la recurrencia (sin cambiar fechas)."
-                                        : "Editar datos de la reunión (sin cambiar fechas)."
-                                      : "No hay una fecha futura editable para esta reunión."
+                                        ? "Editar datos de toda la recurrencia."
+                                        : "Editar datos de la reunión."
+                                      : isAdminView
+                                        ? "No hay una fecha con evento interno para editar."
+                                        : "No hay una fecha futura editable para esta reunión."
                                   }
                                 >
                                   <span>
@@ -3481,6 +3620,76 @@ export function SpaTabSolicitudes({
             startIcon={<EditOutlinedIcon fontSize="small" />}
           >
             {isSubmittingEditMeeting ? "Guardando..." : "Guardar cambios"}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      <Dialog
+        open={Boolean(editMeetingDurationDialog)}
+        onClose={closeEditMeetingDurationDialog}
+        fullWidth
+        maxWidth="xs"
+      >
+        <DialogTitle>Ajustar duración real</DialogTitle>
+        <DialogContent>
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 1.2 }}>
+            Pedido: {editMeetingDurationDialog?.titulo || "-"}
+          </Typography>
+          <Typography variant="body2" sx={{ mb: 0.6, fontWeight: 600 }}>
+            {editMeetingDurationDialog?.fechaLabel || "-"}
+          </Typography>
+          <Typography variant="caption" color="text.secondary" sx={{ display: "block", mb: 1.4 }}>
+            Programada: {editMeetingDurationDialog?.minutosProgramados ?? 0} minutos
+            {typeof editMeetingDurationDialog?.minutosRealesActuales === "number"
+              ? ` • Actual: ${editMeetingDurationDialog.minutosRealesActuales} minutos`
+              : ""}
+          </Typography>
+
+          <TextField
+            autoFocus
+            margin="dense"
+            label="Duración real"
+            type="number"
+            fullWidth
+            required
+            value={editMeetingDurationMinutes}
+            onChange={(event) => setEditMeetingDurationMinutes(event.target.value)}
+            InputProps={{
+              inputProps: { min: 1, max: 1440, step: 1 },
+              endAdornment: <InputAdornment position="end">min</InputAdornment>
+            }}
+            helperText="Ingresa los minutos reales que duró la reunión."
+            disabled={
+              Boolean(editMeetingDurationDialog) &&
+              updatingMeetingDurationEventId === editMeetingDurationDialog?.eventoId
+            }
+          />
+        </DialogContent>
+        <DialogActions>
+          <Button
+            onClick={closeEditMeetingDurationDialog}
+            disabled={
+              Boolean(editMeetingDurationDialog) &&
+              updatingMeetingDurationEventId === editMeetingDurationDialog?.eventoId
+            }
+          >
+            Cancelar
+          </Button>
+          <Button
+            variant="contained"
+            onClick={() => void submitEditMeetingDurationDialog()}
+            disabled={
+              !editMeetingDurationDialog ||
+              !Number.isFinite(Number.parseInt(editMeetingDurationMinutes, 10)) ||
+              Number.parseInt(editMeetingDurationMinutes, 10) < 1 ||
+              Number.parseInt(editMeetingDurationMinutes, 10) > 1440 ||
+              updatingMeetingDurationEventId === editMeetingDurationDialog?.eventoId
+            }
+            startIcon={<AccessTimeOutlinedIcon fontSize="small" />}
+          >
+            {editMeetingDurationDialog && updatingMeetingDurationEventId === editMeetingDurationDialog?.eventoId
+              ? "Guardando..."
+              : "Guardar duración"}
           </Button>
         </DialogActions>
       </Dialog>

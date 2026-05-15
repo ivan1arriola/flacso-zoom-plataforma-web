@@ -332,7 +332,16 @@ export function SpaHomeScreen() {
   const [resolvingManualSolicitudId, setResolvingManualSolicitudId] = useState<string | null>(null);
   
   // Agenda Libre
-  const { agendaLibre, setAgendaLibre, updatingInterestId, setUpdatingInterestId, isLoadingAgendaLibre, setIsLoadingAgendaLibre } = useAgendaLibre();
+  const {
+    agendaLibre,
+    setAgendaLibre,
+    updatingInterestId,
+    setUpdatingInterestId,
+    isLoadingAgendaLibre,
+    setIsLoadingAgendaLibre,
+    hasLoadedAgendaLibre,
+    setHasLoadedAgendaLibre
+  } = useAgendaLibre();
   
   // Assignment Board
   const {
@@ -416,6 +425,7 @@ export function SpaHomeScreen() {
   const [isRegisteringUpcomingMeeting, setIsRegisteringUpcomingMeeting] = useState(false);
   const [updatingAsistenciaSolicitudId, setUpdatingAsistenciaSolicitudId] = useState<string | null>(null);
   const [updatingAsistenciaInstanciaKey, setUpdatingAsistenciaInstanciaKey] = useState<string | null>(null);
+  const [updatingMeetingDurationEventId, setUpdatingMeetingDurationEventId] = useState<string | null>(null);
   const [removingAssistanceAssignmentEventId, setRemovingAssistanceAssignmentEventId] = useState<string | null>(null);
   
   // User Profile & Auth
@@ -461,6 +471,10 @@ export function SpaHomeScreen() {
     [effectiveRole]
   );
   const canEditSolicitudAssistance = useMemo(
+    () => ["DOCENTE", "ADMINISTRADOR"].includes(effectiveRole),
+    [effectiveRole]
+  );
+  const canEditSolicitudDuration = useMemo(
     () => ["DOCENTE", "ADMINISTRADOR"].includes(effectiveRole),
     [effectiveRole]
   );
@@ -873,6 +887,7 @@ export function SpaHomeScreen() {
           (async () => {
             const agenda = await loadAgendaLibre();
             if (agenda) setAgendaLibre(agenda);
+            setHasLoadedAgendaLibre(true);
           })()
         );
       }
@@ -988,17 +1003,18 @@ export function SpaHomeScreen() {
   }, [tab, canSeeUsers]);
 
   useEffect(() => {
-    if (tab !== "agenda_libre" || !canSeeAgendaLibre) return;
-    (async () => {
-      setIsLoadingAgendaLibre(true);
-      try {
-        const agenda = await loadAgendaLibre();
-        if (agenda) setAgendaLibre(agenda);
-      } finally {
-        setIsLoadingAgendaLibre(false);
-      }
-    })();
-  }, [tab, canSeeAgendaLibre]);
+      if (tab !== "agenda_libre" || !canSeeAgendaLibre) return;
+      (async () => {
+        setIsLoadingAgendaLibre(true);
+        try {
+          const agenda = await loadAgendaLibre();
+          if (agenda) setAgendaLibre(agenda);
+          setHasLoadedAgendaLibre(true);
+        } finally {
+          setIsLoadingAgendaLibre(false);
+        }
+      })();
+  }, [tab, canSeeAgendaLibre, setHasLoadedAgendaLibre]);
 
   useEffect(() => {
     if (tab !== "asistentes_asignacion" || !canSeeAsistentesAsignacion) return;
@@ -1071,6 +1087,7 @@ export function SpaHomeScreen() {
       if (summaryData) setSummary(summaryData);
       if (solicitudesData) setSolicitudes(solicitudesData);
       if (agendaData) setAgendaLibre(agendaData);
+      setHasLoadedAgendaLibre(true);
       if (assignmentData) {
         setAssignmentBoardEvents(assignmentData.events ?? []);
         setAssignableAssistants(assignmentData.assistants ?? []);
@@ -1420,6 +1437,46 @@ export function SpaHomeScreen() {
     }
   }
 
+  async function editSolicitudMeetingDuration(input: {
+    eventoId: string;
+    titulo: string;
+    inicioProgramadoAt: string;
+    minutosReales: number;
+  }): Promise<boolean> {
+    setMessage("");
+    setUpdatingMeetingDurationEventId(input.eventoId);
+
+    try {
+      const normalizedMinutes = Math.floor(input.minutosReales);
+      if (!Number.isFinite(normalizedMinutes) || normalizedMinutes < 1 || normalizedMinutes > 1440) {
+        setMessage("La duración real debe estar entre 1 y 1440 minutos.");
+        return false;
+      }
+
+      const response = await updatePastMeetingApi({
+        eventoId: input.eventoId,
+        minutosReales: normalizedMinutes
+      });
+      if (!response.success) {
+        setMessage(response.error ?? "No se pudo actualizar la duración de la reunión.");
+        return false;
+      }
+
+      const fechaLabel = new Date(input.inicioProgramadoAt).toLocaleString("es-UY", {
+        dateStyle: "short",
+        timeStyle: "short"
+      });
+      setMessage(`Duración real actualizada (${normalizedMinutes} min) en "${input.titulo}" (${fechaLabel}).`);
+      await refreshAfterSolicitudMutation();
+      return true;
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "No se pudo actualizar la duración de la reunión.");
+      return false;
+    } finally {
+      setUpdatingMeetingDurationEventId(null);
+    }
+  }
+
   async function editUpcomingSolicitudMeeting(input: {
     solicitudId: string;
     eventoId: string;
@@ -1763,6 +1820,7 @@ export function SpaHomeScreen() {
       setMessage("Interés actualizado.");
       const [agendaData, assignmentData] = await Promise.all([loadAgendaLibre(), loadAssignmentBoard()]);
       if (agendaData) setAgendaLibre(agendaData);
+      setHasLoadedAgendaLibre(true);
       if (assignmentData) {
         setAssignmentBoardEvents(assignmentData.events ?? []);
         setAssignableAssistants(assignmentData.assistants ?? []);
@@ -2447,6 +2505,7 @@ export function SpaHomeScreen() {
           onRefresh={refreshSummary}
           role={effectiveRole || "ADMINISTRADOR"}
           agendaLibre={agendaLibre}
+          hasLoadedAgendaLibre={hasLoadedAgendaLibre}
           onGoToCreateMeeting={() => {
             setTab("crear_reunion");
           }}
@@ -2487,6 +2546,9 @@ export function SpaHomeScreen() {
           onSendReminder={sendSolicitudReminder}
           canEditMeeting={canEditSolicitudAssistance}
           onEditMeeting={editUpcomingSolicitudMeeting}
+          canEditMeetingDuration={canEditSolicitudDuration}
+          updatingMeetingDurationEventId={updatingMeetingDurationEventId}
+          onEditMeetingDuration={editSolicitudMeetingDuration}
           canReassignRecurringSolicitud={canDelegateSolicitudResponsable}
           onReassignRecurringSolicitud={reassignRecurringSolicitudResponsable}
           canEditAssistance={canEditSolicitudAssistance}
@@ -2533,6 +2595,9 @@ export function SpaHomeScreen() {
           onSendReminder={sendSolicitudReminder}
           canEditMeeting={canEditSolicitudAssistance}
           onEditMeeting={editUpcomingSolicitudMeeting}
+          canEditMeetingDuration={canEditSolicitudDuration}
+          updatingMeetingDurationEventId={updatingMeetingDurationEventId}
+          onEditMeetingDuration={editSolicitudMeetingDuration}
           canReassignRecurringSolicitud={canDelegateSolicitudResponsable}
           onReassignRecurringSolicitud={reassignRecurringSolicitudResponsable}
           canEditAssistance={canEditSolicitudAssistance}

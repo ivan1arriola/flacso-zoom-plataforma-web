@@ -46,6 +46,8 @@ export type DashboardSummary = {
   eventosCriticosSinLinkZoom?: number;
   agendaDisponible?: number;
   misPostulaciones?: number;
+  misPendientesAgenda?: number;
+  misRespuestasAgenda?: number;
   misAsignacionesProximas?: number;
   misHorasMes?: number;
   misHorasVirtualesMes?: number;

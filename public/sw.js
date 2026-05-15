@@ -4,8 +4,7 @@ const OFFLINE_URLS = [
   "/manifest.webmanifest",
   "/pwa-192x192.png",
   "/pwa-512x512.png",
-  "/apple-touch-icon.png",
-  "/favicon.ico"
+  "/apple-touch-icon.png"
 ];
 
 self.addEventListener("install", (event) => {
@@ -94,7 +93,7 @@ self.addEventListener("push", (event) => {
     const options = {
       body: payload.body,
       icon: payload.icon || "/pwa-192x192.png",
-      badge: "/favicon.ico",
+      badge: "/pwa-192x192.png",
       data: {
         url: payload.url || "/"
       },

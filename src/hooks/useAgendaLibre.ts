@@ -5,6 +5,7 @@ export function useAgendaLibre() {
   const [agendaLibre, setAgendaLibre] = useState<AgendaEvent[]>([]);
   const [updatingInterestId, setUpdatingInterestId] = useState<string | null>(null);
   const [isLoadingAgendaLibre, setIsLoadingAgendaLibre] = useState(false);
+  const [hasLoadedAgendaLibre, setHasLoadedAgendaLibre] = useState(false);
 
   return {
     agendaLibre,
@@ -12,6 +13,8 @@ export function useAgendaLibre() {
     updatingInterestId,
     setUpdatingInterestId,
     isLoadingAgendaLibre,
-    setIsLoadingAgendaLibre
+    setIsLoadingAgendaLibre,
+    hasLoadedAgendaLibre,
+    setHasLoadedAgendaLibre
   };
 }

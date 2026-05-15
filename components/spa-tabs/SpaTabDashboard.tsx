@@ -68,6 +68,7 @@ interface SpaTabDashboardProps {
   onRefresh?: () => void;
   role: DashboardRole;
   agendaLibre?: AgendaEvent[];
+  hasLoadedAgendaLibre?: boolean;
   onGoToCreateMeeting?: () => void;
   onGoToAssignAssistants?: () => void;
   onGoToAgendaAvailable?: () => void;
@@ -188,6 +189,15 @@ function formatDateTime24(value: string): string {
     timeStyle: "short",
     hour12: false
   });
+}
+
+type InterestState = "ME_INTERESA" | "NO_ME_INTERESA" | "RETIRADO" | "SIN_RESPUESTA";
+
+function resolveInterestState(value?: string | null): InterestState {
+  if (value === "ME_INTERESA") return "ME_INTERESA";
+  if (value === "RETIRADO") return "RETIRADO";
+  if (value === "NO_ME_INTERESA") return "NO_ME_INTERESA";
+  return "SIN_RESPUESTA";
 }
 
 function normalizeZoomMeetingId(value?: string | null): string | null {
@@ -645,6 +655,7 @@ export function SpaTabDashboard({
   isLoadingSummary = false,
   role,
   agendaLibre = [],
+  hasLoadedAgendaLibre = false,
   onGoToCreateMeeting,
   onGoToAssignAssistants,
   onGoToAgendaAvailable,
@@ -915,6 +926,19 @@ export function SpaTabDashboard({
       </Box>
     );
   }
+
+  const pendingResponsesFromAgenda = agendaLibre.filter(
+    (item) => resolveInterestState(item.intereses[0]?.estadoInteres) === "SIN_RESPUESTA"
+  ).length;
+  const answeredResponsesFromAgenda = agendaLibre.filter(
+    (item) => resolveInterestState(item.intereses[0]?.estadoInteres) !== "SIN_RESPUESTA"
+  ).length;
+  const pendingResponsesCount = hasLoadedAgendaLibre
+    ? pendingResponsesFromAgenda
+    : metricValue(summary, "misPendientesAgenda");
+  const answeredResponsesCount = hasLoadedAgendaLibre
+    ? answeredResponsesFromAgenda
+    : metricValue(summary, "misRespuestasAgenda");
 
   if (isAccountingRole) {
     const virtualRate = Number(tarifasByModalidad.VIRTUAL?.valorHora ?? 0);
@@ -2203,7 +2227,7 @@ export function SpaTabDashboard({
                   <PendingActionsIcon fontSize="small" /> Sin respuesta
                 </Typography>
                 <Typography variant="h3" sx={{ fontWeight: 900, color: "warning.main", mt: 1 }}>
-                  {agendaLibre.filter(i => !i.intereses?.length || i.intereses[0].estadoInteres === "SIN_RESPUESTA").length}
+                  {pendingResponsesCount}
                 </Typography>
                 <Typography variant="body2" sx={{ color: toneColor("warning"), mt: 0.5, lineHeight: 1.1, fontSize: "0.75rem" }}>
                   Esperando por tu acción.
@@ -2217,7 +2241,7 @@ export function SpaTabDashboard({
                   <CheckCircleIcon fontSize="small" /> Ya respondidas
                 </Typography>
                 <Typography variant="h3" sx={{ fontWeight: 900, color: "success.main", mt: 1 }}>
-                  {agendaLibre.filter(i => i.intereses?.length > 0 && i.intereses[0].estadoInteres !== "SIN_RESPUESTA").length}
+                  {answeredResponsesCount}
                 </Typography>
                 <Typography variant="body2" sx={{ color: toneColor("success"), mt: 0.5, lineHeight: 1.1, fontSize: "0.75rem" }}>
                   Postulaciones o rechazos.
