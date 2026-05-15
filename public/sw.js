@@ -10,7 +10,18 @@ const OFFLINE_URLS = [
 
 self.addEventListener("install", (event) => {
   event.waitUntil(
-    caches.open(CACHE_NAME).then((cache) => cache.addAll(OFFLINE_URLS))
+    caches.open(CACHE_NAME).then(async (cache) => {
+      // Evitar que falle toda la instalación por un asset con 404/500
+      await Promise.allSettled(
+        OFFLINE_URLS.map(async (url) => {
+          try {
+            await cache.add(url);
+          } catch (error) {
+            console.warn("[SW] No se pudo precachear:", url, error);
+          }
+        })
+      );
+    })
   );
   self.skipWaiting();
 });

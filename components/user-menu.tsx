@@ -1,6 +1,6 @@
 "use client";
 
-import { MouseEvent, useMemo, useState } from "react";
+import { MouseEvent, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { signOut } from "next-auth/react";
 import {
@@ -50,9 +50,11 @@ export function UserMenu({ firstName, lastName, email, image, role, vertical = f
   const [anchorEl, setAnchorEl] = useState<HTMLElement | null>(null);
   const router = useRouter();
   const { identities, isLoading, switchAccount, removeAccount, syncCurrentAccount } = useMultiAccount();
+  const lastSyncedEmailRef = useRef<string | null>(null);
 
   useEffect(() => {
-    if (email) {
+    if (email && lastSyncedEmailRef.current !== email) {
+      lastSyncedEmailRef.current = email;
       syncCurrentAccount();
     }
   }, [email, syncCurrentAccount]);
