@@ -5776,7 +5776,9 @@ export class SalasService {
         };
       })
       .filter((item): item is NonNullable<typeof item> => item !== null);
-   async updatePastMeeting(
+  }
+
+  async updatePastMeeting(
     user: SessionUser,
     eventoId: string,
     input: {
@@ -5785,6 +5787,7 @@ export class SalasService {
       minutosReales?: number;
       inicioRealAt?: string | Date;
       finRealAt?: string | Date;
+      modalidadReunion?: ModalidadReunion;
     }
   ) {
     const event = await db.eventoZoom.findUnique({
@@ -5915,13 +5918,32 @@ export class SalasService {
       };
     }
 
-    // Calcular nuevo costo si cambió la duración o el monitor
+    const previousModalidad = event.modalidadReunion;
+    const nextModalidad = input.modalidadReunion || previousModalidad;
+    const modalityChanged = nextModalidad !== previousModalidad;
+
+    // Calcular nuevo costo si cambió la duración, el monitor o la modalidad
     let newAmount: Prisma.Decimal | null = null;
-    if (shouldUpdateMonitor && rate) {
-      newAmount = calculateEstimatedCost(finalMinutosReales, Number(rate.valorHora));
-    } else if (event.asignaciones[0] && (finalMinutosReales !== event.minutosReales)) {
-      // Si solo cambió la duración, recalcular con la tarifa ya pactada
-      newAmount = calculateEstimatedCost(finalMinutosReales, Number(event.asignaciones[0].tarifaAplicadaHora));
+    let rateToApply = rate;
+
+    if (modalityChanged && !rateToApply) {
+      const activeRate = await getActiveRate(nextModalidad);
+      if (activeRate) {
+        rateToApply = {
+          valorHora: activeRate.valorHora,
+          moneda: activeRate.moneda
+        };
+      }
+    }
+
+    if (shouldUpdateMonitor && rateToApply) {
+      newAmount = calculateEstimatedCost(finalMinutosReales, Number(rateToApply.valorHora));
+    } else if (modalityChanged && rateToApply) {
+      newAmount = calculateEstimatedCost(finalMinutosReales, Number(rateToApply.valorHora));
+    } else if (event.asignaciones[0] && finalMinutosReales !== event.minutosReales) {
+      // Si solo cambió la duración, recalcular con la tarifa ya pactada (o la nueva si cambió modalidad)
+      const baseRate = rateToApply?.valorHora ?? event.asignaciones[0].tarifaAplicadaHora;
+      newAmount = calculateEstimatedCost(finalMinutosReales, Number(baseRate));
     }
 
     await db.$transaction(async (tx) => {
@@ -5929,6 +5951,7 @@ export class SalasService {
         where: { id: event.solicitud.id },
         data: {
           programaNombre: programaNombreFinal,
+          modalidadReunion: nextModalidad,
           requiereAsistencia: normalizedMonitorEmail ? true : undefined,
           motivoAsistencia:
             normalizedMonitorEmail && !event.solicitud.requiereAsistencia
@@ -5937,7 +5960,7 @@ export class SalasService {
         }
       });
 
-      if (shouldUpdateMonitor && monitorUser && rate && newAmount) {
+      if (shouldUpdateMonitor && monitorUser && rateToApply && newAmount) {
         const assistant = await tx.asistenteZoom.upsert({
           where: { usuarioId: monitorUser.id },
           create: { usuarioId: monitorUser.id },
@@ -5967,21 +5990,30 @@ export class SalasService {
             motivoAsignacion: "Ajuste administrativo de reunion pasada.",
             reasignacionDeId: previousAssignmentId ?? undefined,
             fechaRespuestaAt: new Date(),
-            modalidadSnapshot: event.modalidadReunion,
-            tarifaAplicadaHora: rate.valorHora,
-            moneda: rate.moneda,
+            modalidadSnapshot: nextModalidad,
+            tarifaAplicadaHora: rateToApply.valorHora,
+            moneda: rateToApply.moneda,
             montoEstimado: newAmount,
             montoConfirmado: newAmount
           }
         });
       } else if (newAmount && event.asignaciones[0]) {
-        // Actualizar monto de la asignación actual si solo cambió la duración
+        // Actualizar monto de la asignación actual si cambió la duración o modalidad
         await tx.asignacionAsistente.update({
           where: { id: event.asignaciones[0].id },
           data: {
+            modalidadSnapshot: nextModalidad,
+            tarifaAplicadaHora: rateToApply?.valorHora ?? undefined,
+            moneda: rateToApply?.moneda ?? undefined,
             montoEstimado: newAmount,
             montoConfirmado: newAmount
           }
+        });
+      } else if (modalityChanged && event.asignaciones[0]) {
+        // Solo cambió modalidad pero no pudimos recalcular monto? (raro pero posible)
+        await tx.asignacionAsistente.update({
+          where: { id: event.asignaciones[0].id },
+          data: { modalidadSnapshot: nextModalidad }
         });
       }
 
@@ -5991,6 +6023,7 @@ export class SalasService {
           inicioRealAt,
           finRealAt,
           minutosReales: finalMinutosReales,
+          modalidadReunion: nextModalidad,
           requiereAsistencia: normalizedMonitorEmail ? true : undefined,
           estadoCobertura: normalizedMonitorEmail ? EstadoCoberturaSoporte.CONFIRMADO : undefined,
           costoEstimado: newAmount ?? undefined,
@@ -6007,12 +6040,14 @@ export class SalasService {
           valorAnterior: {
             programaNombre: event.solicitud.programaNombre ?? null,
             monitorEmail: currentMonitorEmail,
-            minutosReales: event.minutosReales
+            minutosReales: event.minutosReales,
+            modalidadReunion: previousModalidad
           },
           valorNuevo: {
             programaNombre: programaNombreFinal,
             monitorEmail: normalizedMonitorEmail || currentMonitorEmail,
-            minutosReales: finalMinutosReales
+            minutosReales: finalMinutosReales,
+            modalidadReunion: nextModalidad
           }
         }
       });

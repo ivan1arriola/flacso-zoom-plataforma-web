@@ -40,7 +40,7 @@ import {
   loadZoomAccountPassword,
   type PersonHoursMeeting
 } from "@/src/services/tarifasApi";
-import { reportMeetingDuration } from "@/src/services/agendaApi";
+import { reportMeetingDuration, updateUpcomingZoomEvent } from "@/src/services/agendaApi";
 import { updatePastMeeting } from "@/src/services/solicitudesApi";
 import { Dialog, DialogTitle, DialogContent, DialogActions, TextField, InputAdornment } from "@mui/material";
 import { syncUpcomingMeetingsToGoogleCalendar } from "@/src/services/userApi";
@@ -177,7 +177,9 @@ export function SpaTabMisReunionesAsignadas({ userId, role }: SpaTabMisReuniones
   const [selectedMeetingForReport, setSelectedMeetingForReport] = useState<PersonHoursMeeting | null>(null);
   const [reportForm, setReportForm] = useState({ minutos: "", comentarios: "" });
   const [isSubmittingReport, setIsSubmittingReport] = useState(false);
+  const [updatingModalityEventId, setUpdatingModalityEventId] = useState<string | null>(null);
   const isDocente = role === "DOCENTE";
+  const isAdmin = role === "ADMINISTRADOR";
   const syncTimeoutRef = useRef<number | null>(null);
   const syncInFlightRef = useRef(false);
   const lastSyncedSignatureRef = useRef("");
@@ -197,6 +199,30 @@ export function SpaTabMisReunionesAsignadas({ userId, role }: SpaTabMisReuniones
       })
       .join("|");
   }, [meetings]);
+
+  async function toggleModality(meeting: PersonHoursMeeting) {
+    if (!isAdmin) return;
+    const newModality = meeting.modalidadReunion === "VIRTUAL" ? "HIBRIDA" : "VIRTUAL";
+    
+    if (!confirm(`¿Cambiar modalidad de "${meeting.titulo}" a ${newModality === "HIBRIDA" ? "HÍBRIDA" : "VIRTUAL"}?`)) return;
+
+    setUpdatingModalityEventId(meeting.eventId);
+    try {
+      const res = await updateUpcomingZoomEvent(meeting.eventId, {
+        modalidadReunion: newModality
+      });
+      
+      if (res.ok) {
+        void refresh();
+      } else {
+        alert(res.error || "No se pudo cambiar la modalidad.");
+      }
+    } catch (err) {
+      alert("Error al cambiar la modalidad.");
+    } finally {
+      setUpdatingModalityEventId(null);
+    }
+  }
 
   async function refresh() {
     if (!userId) return;
@@ -579,7 +605,18 @@ export function SpaTabMisReunionesAsignadas({ userId, role }: SpaTabMisReuniones
                           <Stack direction="row" spacing={1} sx={{ mb: 2 }} useFlexGap flexWrap="wrap">
                             <Chip icon={<EventIcon fontSize="small" />} label={new Date(m.inicioAt).toLocaleDateString("es-UY", { weekday: "long", day: "numeric" })} sx={{ fontWeight: 700 }} />
                             <Chip icon={<ScheduleIcon fontSize="small" />} label={`${new Date(m.inicioAt).toLocaleTimeString("es-UY", { hour: "2-digit", minute: "2-digit", hour12: false })} - ${new Date(m.finAt).toLocaleTimeString("es-UY", { hour: "2-digit", minute: "2-digit", hour12: false })} (${formatDuration(m.inicioAt, m.finAt)})`} variant="outlined" sx={{ fontWeight: 700 }} />
-                            <Chip label={isPresencial ? "Presencial" : "Virtual"} color={isPresencial ? "error" : "primary"} sx={{ fontWeight: 800 }} />
+                            <Chip 
+                              label={isPresencial ? "Presencial" : "Virtual"} 
+                              color={isPresencial ? "error" : "primary"} 
+                              sx={{ 
+                                fontWeight: 800,
+                                cursor: isAdmin ? "pointer" : "default",
+                                "&:hover": isAdmin ? { opacity: 0.8 } : {}
+                              }} 
+                              onClick={isAdmin ? () => toggleModality(m) : undefined}
+                              disabled={updatingModalityEventId === m.eventId}
+                              icon={updatingModalityEventId === m.eventId ? <CircularProgress size={16} color="inherit" /> : undefined}
+                            />
                             <Chip icon={<LayersIcon fontSize="small" />} label={m.solicitudId ? "Serie Recurrente" : "Reunión Única"} sx={{ fontWeight: 700 }} />
                           </Stack>
 

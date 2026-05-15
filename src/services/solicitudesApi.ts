@@ -249,9 +249,10 @@ export async function submitPastMeeting(payload: Record<string, unknown>): Promi
 
 export async function updatePastMeeting(input: {
   eventoId: string;
-  programaNombre: string;
+  programaNombre?: string;
   monitorEmail?: string;
   minutosReales?: number;
+  modalidadReunion?: "VIRTUAL" | "HIBRIDA";
 }): Promise<{
   success: boolean;
   error?: string;
@@ -263,7 +264,8 @@ export async function updatePastMeeting(input: {
       ...withJsonBody({
         programaNombre: input.programaNombre,
         monitorEmail: input.monitorEmail,
-        minutosReales: input.minutosReales
+        minutosReales: input.minutosReales,
+        modalidadReunion: input.modalidadReunion
       })
     }
   );

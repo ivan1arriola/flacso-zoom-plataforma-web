@@ -11,7 +11,8 @@ type Params = { params: Promise<{ eventoId: string }> };
 const bodySchema = z.object({
   programaNombre: z.string().trim().max(120).optional().or(z.literal("")),
   monitorEmail: z.string().trim().email("Email asistente invalido.").optional().or(z.literal("")),
-  minutosReales: z.number().int().min(1).max(1440).optional()
+  minutosReales: z.number().int().min(1).max(1440).optional(),
+  modalidadReunion: z.enum(["VIRTUAL", "HIBRIDA"]).optional()
 });
 
 export async function PATCH(request: Request, context: Params) {
@@ -42,7 +43,8 @@ export async function PATCH(request: Request, context: Params) {
           : undefined,
       monitorEmail:
         typeof parsed.data.monitorEmail === "string" ? parsed.data.monitorEmail : undefined,
-      minutosReales: parsed.data.minutosReales
+      minutosReales: parsed.data.minutosReales,
+      modalidadReunion: parsed.data.modalidadReunion
     });
     return NextResponse.json({ ok: true });
   } catch (error) {

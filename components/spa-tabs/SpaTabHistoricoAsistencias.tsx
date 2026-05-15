@@ -81,7 +81,9 @@ export function SpaTabHistoricoAsistencias({ userId, role }: SpaTabHistoricoAsis
   const [selectedMeetingForReport, setSelectedMeetingForReport] = useState<PersonHoursMeeting | null>(null);
   const [reportForm, setReportForm] = useState({ minutos: "", comentarios: "" });
   const [isSubmittingReport, setIsSubmittingReport] = useState(false);
+  const [updatingModalityEventId, setUpdatingModalityEventId] = useState<string | null>(null);
   const isDocente = role === "DOCENTE";
+  const isAdmin = role === "ADMINISTRADOR";
 
   async function refresh() {
     if (!userId) return;
@@ -180,6 +182,31 @@ export function SpaTabHistoricoAsistencias({ userId, role }: SpaTabHistoricoAsis
       alert("Error al procesar el cambio.");
     } finally {
       setIsSubmittingReport(false);
+    }
+  }
+
+  async function toggleModality(meeting: PersonHoursMeeting) {
+    if (!isAdmin) return;
+    const newModality = meeting.modalidadReunion === "VIRTUAL" ? "HIBRIDA" : "VIRTUAL";
+    
+    if (!confirm(`¿Cambiar modalidad de "${meeting.titulo}" a ${newModality === "HIBRIDA" ? "HÍBRIDA" : "VIRTUAL"}?`)) return;
+
+    setUpdatingModalityEventId(meeting.eventId);
+    try {
+      const res = await updatePastMeeting({
+        eventoId: meeting.eventId,
+        modalidadReunion: newModality
+      });
+      
+      if (res.success) {
+        void refresh();
+      } else {
+        alert(res.error || "No se pudo cambiar la modalidad.");
+      }
+    } catch (err) {
+      alert("Error al cambiar la modalidad.");
+    } finally {
+      setUpdatingModalityEventId(null);
     }
   }
 
@@ -357,39 +384,53 @@ export function SpaTabHistoricoAsistencias({ userId, role }: SpaTabHistoricoAsis
                                 {role === "DOCENTE" ? `Asistente: ${m.asistenteNombre || "Sin asignar"}` : `Responsable: ${m.responsableNombre || "No definido"}`}
                               </Typography>
                               <Stack direction="row" spacing={1} alignItems="center">
-                                <Chip size="small" label={isPresencial ? "Presencial" : "Virtual"} color={isPresencial ? "error" : "primary"} sx={{ fontWeight: 800, height: 18, fontSize: "0.65rem" }} />
+                                <Chip 
+                                  size="small" 
+                                  label={isPresencial ? "Presencial" : "Virtual"} 
+                                  color={isPresencial ? "error" : "primary"} 
+                                  sx={{ 
+                                    fontWeight: 800, 
+                                    height: 18, 
+                                    fontSize: "0.65rem",
+                                    cursor: isAdmin ? "pointer" : "default",
+                                    "&:hover": isAdmin ? { opacity: 0.8 } : {}
+                                  }} 
+                                  onClick={isAdmin ? () => toggleModality(m) : undefined}
+                                  disabled={updatingModalityEventId === m.eventId}
+                                />
                                 <Typography variant="caption" sx={{ fontWeight: 600, color: "text.secondary", display: "flex", alignItems: "center", gap: 0.5 }}>
                                   <ScheduleIcon sx={{ fontSize: 14 }} /> {formatMinutesAsHHMM(m.minutos)}
                                 </Typography>
                               </Stack>
                             </Box>
                           </Stack>
-                    <Stack direction="row" spacing={1} sx={{ mt: 1, ml: 6 }}>
-                      <Button
-                        size="small"
-                        variant="outlined"
-                        startIcon={<EditNoteIcon />}
-                        onClick={() => openReportDialog(m)}
-                        sx={{ borderRadius: 1.5, fontSize: "0.7rem", py: 0.2, textTransform: "none" }}
-                      >
-                        {isDocente ? "Ajustar Duración" : "Informar"}
-                      </Button>
-                    </Stack>
-                    {!isDocente && m.comentariosReporte && (
-                      <Box sx={{ mt: 1, ml: 6, p: 0.8, borderRadius: 1.2, bgcolor: alpha(theme.palette.text.primary, 0.03), borderLeft: "2px solid", borderLeftColor: "divider" }}>
-                        <Typography variant="caption" sx={{ display: "flex", alignItems: "center", gap: 0.5, fontWeight: 600, color: "text.secondary", fontSize: "0.65rem" }}>
-                          <CommentIcon sx={{ fontSize: 12 }} /> Reportado: {formatMinutesAsHHMM(m.minutosReportados || 0)} - {m.comentariosReporte}
-                        </Typography>
-                      </Box>
-                    )}
-                    {isDocente && m.minutosReportados && (
-                      <Box sx={{ mt: 1, ml: 6, p: 0.8, borderRadius: 1.2, bgcolor: alpha(theme.palette.warning.main, 0.05), borderLeft: "2px solid", borderLeftColor: "warning.main" }}>
-                        <Typography variant="caption" sx={{ display: "flex", alignItems: "center", gap: 0.5, fontWeight: 700, color: "warning.dark", fontSize: "0.65rem" }}>
-                          <HistoryEduIcon sx={{ fontSize: 12 }} /> Asistente reportó {formatMinutesAsHHMM(m.minutosReportados)}: "{m.comentariosReporte}"
-                        </Typography>
-                      </Box>
-                    )}
-                  </CardContent>
+                          <Stack direction="row" spacing={1} sx={{ ml: 2 }}>
+                            <Button
+                              size="small"
+                              variant="outlined"
+                              startIcon={<EditNoteIcon />}
+                              onClick={() => openReportDialog(m)}
+                              sx={{ borderRadius: 1.5, fontSize: "0.7rem", py: 0.2, textTransform: "none" }}
+                            >
+                              {isDocente ? "Ajustar Duración" : "Informar"}
+                            </Button>
+                          </Stack>
+                        </Stack>
+                        {!isDocente && m.comentariosReporte && (
+                          <Box sx={{ mt: 1, ml: 6, p: 0.8, borderRadius: 1.2, bgcolor: alpha(theme.palette.text.primary, 0.03), borderLeft: "2px solid", borderLeftColor: "divider" }}>
+                            <Typography variant="caption" sx={{ display: "flex", alignItems: "center", gap: 0.5, fontWeight: 600, color: "text.secondary", fontSize: "0.65rem" }}>
+                              <CommentIcon sx={{ fontSize: 12 }} /> Reportado: {formatMinutesAsHHMM(m.minutosReportados || 0)} - {m.comentariosReporte}
+                            </Typography>
+                          </Box>
+                        )}
+                        {isDocente && m.minutosReportados && (
+                          <Box sx={{ mt: 1, ml: 6, p: 0.8, borderRadius: 1.2, bgcolor: alpha(theme.palette.warning.main, 0.05), borderLeft: "2px solid", borderLeftColor: "warning.main" }}>
+                            <Typography variant="caption" sx={{ display: "flex", alignItems: "center", gap: 0.5, fontWeight: 700, color: "warning.dark", fontSize: "0.65rem" }}>
+                              <HistoryEduIcon sx={{ fontSize: 12 }} /> Asistente reportó {formatMinutesAsHHMM(m.minutosReportados)}: "{m.comentariosReporte}"
+                            </Typography>
+                          </Box>
+                        )}
+                      </CardContent>
                 </Card>
                   );
                 })}
