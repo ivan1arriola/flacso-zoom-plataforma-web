@@ -18,9 +18,16 @@ export function usePushNotifications() {
     try {
       const registration = await navigator.serviceWorker.ready;
       const subscription = await registration.pushManager.getSubscription();
-      setIsSubscribed(!!subscription);
+      if (!subscription || Notification.permission !== "granted") {
+        setIsSubscribed(false);
+        return;
+      }
+
+      await persistSubscription(subscription);
+      setIsSubscribed(true);
     } catch (error) {
       console.error("Error al verificar estado de push:", error);
+      setIsSubscribed(false);
     } finally {
       setIsLoading(false);
     }
@@ -40,6 +47,40 @@ export function usePushNotifications() {
     }
     return outputArray;
   };
+
+  const persistSubscription = useCallback(async (subscription: PushSubscription) => {
+    const payload = subscription.toJSON() as {
+      endpoint?: string;
+      keys?: {
+        p256dh?: string;
+        auth?: string;
+      };
+    };
+
+    if (!payload.endpoint || !payload.keys?.p256dh || !payload.keys?.auth) {
+      throw new Error("La suscripcion push del navegador es invalida.");
+    }
+
+    const res = await fetch("/api/v1/notificaciones/push/subscribe", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        subscription: {
+          endpoint: payload.endpoint,
+          keys: {
+            p256dh: payload.keys.p256dh,
+            auth: payload.keys.auth
+          }
+        },
+        userAgent: navigator.userAgent
+      })
+    });
+
+    if (!res.ok) {
+      const subscribePayload = (await res.json().catch(() => ({}))) as { error?: string };
+      throw new Error(subscribePayload.error ?? "No se pudo registrar la suscripcion push.");
+    }
+  }, []);
 
   const subscribe = async () => {
     if (permission === "unsupported") return false;
@@ -77,30 +118,22 @@ export function usePushNotifications() {
 
       // 3. Suscribir en el navegador
       const registration = await navigator.serviceWorker.ready;
-      const subscription = await registration.pushManager.subscribe({
-        userVisibleOnly: true,
-        applicationServerKey: urlBase64ToUint8Array(publicKey)
-      });
+      const existingSubscription = await registration.pushManager.getSubscription();
+      const subscription =
+        existingSubscription ??
+        (await registration.pushManager.subscribe({
+          userVisibleOnly: true,
+          applicationServerKey: urlBase64ToUint8Array(publicKey)
+        }));
 
       // 4. Enviar al backend
-      const res = await fetch("/api/v1/notificaciones/push/subscribe", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          subscription,
-          userAgent: navigator.userAgent
-        })
-      });
-
-      if (res.ok) {
-        setIsSubscribed(true);
-        return true;
-      }
-      const subscribePayload = (await res.json().catch(() => ({}))) as { error?: string };
-      throw new Error(subscribePayload.error ?? "No se pudo registrar la suscripcion push.");
+      await persistSubscription(subscription);
+      setIsSubscribed(true);
+      return true;
     } catch (error) {
       console.error("Error al suscribir:", error);
       setLastError(error instanceof Error ? error.message : "No se pudo activar notificaciones push.");
+      setIsSubscribed(false);
       return false;
     } finally {
       setIsLoading(false);

@@ -6,6 +6,7 @@ const tabs = [
   "notificaciones",
   "crear_reunion",
   "solicitudes",
+  "agenda_admin",
   "programas",
   "agenda_libre",
   "mis_reuniones_asignadas",
@@ -44,6 +45,7 @@ export function useUIState() {
     if (rawTab === "pasadas") return "pasadas_zoom" as Tab;
     if (rawTab === "grabaciones") return "zoom_drive_sync" as Tab;
     if (rawTab === "programa") return "programas" as Tab;
+    if (rawTab === "calendario" || rawTab === "agenda-general") return "agenda_admin" as Tab;
     if (rawTab === "historico") return "historico_asistencias" as Tab;
     return tabs.includes(rawTab as Tab) ? (rawTab as Tab) : null;
   }, [searchParams]);

@@ -366,10 +366,32 @@ export function SpaTabNotificaciones({ isAdmin }: SpaTabNotificacionesProps) {
         }
       }
 
-      const response = await fetch("/api/v1/notificaciones/push/test", {
-        method: "POST"
-      });
-      const data = (await response.json()) as { error?: string; message?: string };
+      const sendTestPush = () =>
+        fetch("/api/v1/notificaciones/push/test", {
+          method: "POST"
+        });
+
+      let response = await sendTestPush();
+      let data = (await response.json()) as { error?: string; message?: string };
+
+      if (
+        !response.ok &&
+        response.status === 400 &&
+        typeof data.error === "string" &&
+        data.error.includes("suscripciones push activas")
+      ) {
+        await unsubscribePush();
+        const resubscribed = await subscribePush();
+        if (!resubscribed) {
+          setPushTestError(
+            pushSubscribeError || "No se pudo reparar la suscripcion push en este navegador."
+          );
+          return;
+        }
+
+        response = await sendTestPush();
+        data = (await response.json()) as { error?: string; message?: string };
+      }
 
       if (!response.ok) {
         setPushTestError(data.error ?? "No se pudo enviar la notificacion de prueba.");
@@ -582,6 +604,11 @@ export function SpaTabNotificaciones({ isAdmin }: SpaTabNotificacionesProps) {
               {pushTestError ? (
                 <Typography variant="caption" sx={{ mt: 0.8, display: "block", color: "#ffebee" }}>
                   {pushTestError}
+                </Typography>
+              ) : null}
+              {!pushTestError && pushSubscribeError ? (
+                <Typography variant="caption" sx={{ mt: 0.8, display: "block", color: "#ffebee" }}>
+                  {pushSubscribeError}
                 </Typography>
               ) : null}
             </Paper>

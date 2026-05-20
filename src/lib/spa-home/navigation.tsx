@@ -21,12 +21,14 @@ import QueryStatsOutlinedIcon from "@mui/icons-material/QueryStatsOutlined";
 import SupportAgentIcon from "@mui/icons-material/SupportAgent";
 import NotificationsNoneOutlinedIcon from "@mui/icons-material/NotificationsNoneOutlined";
 import LoginRoundedIcon from "@mui/icons-material/LoginRounded";
+import CalendarMonthOutlinedIcon from "@mui/icons-material/CalendarMonthOutlined";
 
 export const tabs = [
   "dashboard",
   "notificaciones",
   "crear_reunion",
   "solicitudes",
+  "agenda_admin",
   "programas",
   "agenda_libre",
   "mis_reuniones_asignadas",
@@ -95,6 +97,12 @@ export const TAB_CONFIG: Record<Tab, TabConfig> = {
     label: "Pedidos",
     visibleInNavigation: true,
     roles: ["ADMINISTRADOR", "DOCENTE"],
+    group: "OPERACION"
+  },
+  agenda_admin: {
+    label: "Agenda general",
+    visibleInNavigation: true,
+    roles: ["ADMINISTRADOR"],
     group: "OPERACION"
   },
   programas: {
@@ -219,6 +227,7 @@ export const ROLE_PRESENTATION_TABS: Record<ViewRole, readonly Tab[]> = {
     "notificaciones",
     "crear_reunion",
     "solicitudes",
+    "agenda_admin",
     "programas",
     "asistentes_asignacion",
     "asistentes_perfiles",
@@ -330,6 +339,8 @@ export function getTabIcon(tab: Tab): ReactNode {
       return <AddIcon fontSize="small" />;
     case "solicitudes":
       return <DescriptionOutlinedIcon fontSize="small" />;
+    case "agenda_admin":
+      return <CalendarMonthOutlinedIcon fontSize="small" />;
     case "programas":
       return <AutoStoriesOutlinedIcon fontSize="small" />;
     case "agenda_libre":

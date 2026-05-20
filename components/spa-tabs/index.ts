@@ -2,6 +2,7 @@
 
 export { SpaTabDashboard } from "./SpaTabDashboard";
 export { SpaTabSolicitudes } from "./SpaTabSolicitudes";
+export { SpaTabAgendaAdmin } from "./SpaTabAgendaAdmin";
 export { SpaTabProgramas } from "./SpaTabProgramas";
 export { SpaTabAgendaLibre } from "./SpaTabAgendaLibre";
 export { SpaTabMisReunionesAsignadas } from "./SpaTabMisReunionesAsignadas";

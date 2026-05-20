@@ -11,6 +11,10 @@ import Credentials from "next-auth/providers/credentials";
 import Google from "next-auth/providers/google";
 import { z } from "zod";
 import { db } from "@/src/lib/db";
+import {
+  CURRENT_SESSION_COOKIE_NAME,
+  SESSION_COOKIE_OPTIONS
+} from "@/src/lib/auth/cookies";
 import { asBoolean, authSecret, env } from "@/src/lib/env";
 import { createAdminLoginNotifications } from "@/src/modules/notificaciones/service";
 
@@ -134,6 +138,12 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
   trustHost: asBoolean(env.AUTH_TRUST_HOST, true),
   session: {
     strategy: "jwt"
+  },
+  cookies: {
+    sessionToken: {
+      name: CURRENT_SESSION_COOKIE_NAME,
+      options: SESSION_COOKIE_OPTIONS
+    }
   },
   providers: [
     Credentials({

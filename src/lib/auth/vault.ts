@@ -1,20 +1,18 @@
 import { cookies } from "next/headers";
 import { authSecret } from "@/src/lib/env";
 import { createCipheriv, createDecipheriv, randomBytes, scryptSync } from "crypto";
+import {
+  CURRENT_SESSION_COOKIE_NAME,
+  SESSION_COOKIE_NAMES,
+  isSessionCookieName,
+  normalizeSessionCookieName
+} from "@/src/lib/auth/cookies";
 
 const VAULT_COOKIE_NAME = process.env.NODE_ENV === "production" ? "__Secure-next-auth.vault" : "next-auth.vault";
 const VAULT_COOKIE_CHUNK_PREFIX = `${VAULT_COOKIE_NAME}.`;
 const MAX_COOKIE_CHUNK_SIZE = 3800;
 const MAX_VAULT_ENTRIES = 2;
 const VAULT_COOKIE_MAX_AGE_SECONDS = 60 * 60 * 24 * 30; // 30 días
-
-// Nombres de cookies posibles para NextAuth/Auth.js v5
-const SESSION_COOKIE_NAMES = [
-  "authjs.session-token",
-  "__Secure-authjs.session-token",
-  "next-auth.session-token",
-  "__Secure-next-auth.session-token"
-];
 
 export type VaultIdentity = {
   email: string;
@@ -148,7 +146,7 @@ async function clearSessionCookies() {
   const cookieStore = await cookies();
   const allCookies = cookieStore.getAll();
   for (const cookie of allCookies) {
-    if (SESSION_COOKIE_NAMES.some(name => cookie.name === name || cookie.name.startsWith(`${name}.`))) {
+    if (isSessionCookieName(cookie.name)) {
       cookieStore.delete(cookie.name);
     }
   }
@@ -167,12 +165,12 @@ export async function updateCurrentInVault(identity: VaultIdentity) {
     // Buscar cookie base
     const base = cookieStore.get(name);
     if (base) {
-      sessionChunks[name] = base.value;
+      sessionChunks[normalizeSessionCookieName(name)] = base.value;
     }
     // Buscar fragmentos .0, .1, .2...
     for (const c of allCookies) {
       if (c.name.startsWith(`${name}.`)) {
-        sessionChunks[c.name] = c.value;
+        sessionChunks[normalizeSessionCookieName(c.name)] = c.value;
       }
     }
     
@@ -204,9 +202,15 @@ export async function switchSession(targetEmail: string): Promise<boolean> {
     sessionChunks = JSON.parse(decryptedRaw);
   } catch {
     // Retrocompatibilidad con tokens no JSON (viejos)
-    const cookieName = process.env.NODE_ENV === "production" ? "__Secure-authjs.session-token" : "authjs.session-token";
-    sessionChunks = { [cookieName]: decryptedRaw };
+    sessionChunks = { [CURRENT_SESSION_COOKIE_NAME]: decryptedRaw };
   }
+
+  sessionChunks = Object.fromEntries(
+    Object.entries(sessionChunks).map(([name, value]) => [
+      normalizeSessionCookieName(name),
+      value
+    ])
+  );
 
   const cookieStore = await cookies();
   

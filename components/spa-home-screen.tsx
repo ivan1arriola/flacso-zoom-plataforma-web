@@ -122,6 +122,7 @@ import { SpaTabUsuarios } from "@/components/spa-tabs/SpaTabUsuarios";
 import { SpaTabLogins } from "@/components/spa-tabs/SpaTabLogins";
 import { SpaTabPerfil } from "@/components/spa-tabs/SpaTabPerfil";
 import { SpaTabEstadisticas } from "@/components/spa-tabs/SpaTabEstadisticas";
+import { SpaTabAgendaAdmin } from "@/components/spa-tabs/SpaTabAgendaAdmin";
 import { SpaTabNotificaciones } from "@/components/SpaTabNotificaciones";
 import { buildDocenteSolicitudPayload } from "@/components/spa-tabs/solicitud-payload-builder";
 
@@ -460,6 +461,7 @@ export function SpaHomeScreen() {
   const canSeeEstadisticas = canAccessTabForRole("estadisticas", effectiveRole);
   const canSeeNotificaciones = canAccessTabForRole("notificaciones", effectiveRole);
   const canSeeSolicitudes = canAccessTabForRole("solicitudes", effectiveRole);
+  const canSeeAgendaAdmin = canAccessTabForRole("agenda_admin", effectiveRole);
   const canSeeProgramas = canAccessTabForRole("programas", effectiveRole);
   const isDocente = useMemo(() => effectiveRole === "DOCENTE", [effectiveRole]);
   const canSendSolicitudReminder = useMemo(
@@ -2572,6 +2574,10 @@ export function SpaHomeScreen() {
           onSubmit={submitDocenteSolicitud}
           isLoading={isLoadingSolicitudes}
         />
+      )}
+
+      {tab === "agenda_admin" && canSeeAgendaAdmin && (
+        <SpaTabAgendaAdmin solicitudes={solicitudes} />
       )}
 
       {tab === "solicitudes" && canSeeSolicitudes && (
