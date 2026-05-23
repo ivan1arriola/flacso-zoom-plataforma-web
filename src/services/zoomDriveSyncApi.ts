@@ -78,6 +78,7 @@ export type ZoomDriveSyncRunResponse = {
   eventsTail?: Array<{
     event: string;
     timestamp: string;
+    requestId?: string;
     topic?: string | null;
     fileName?: string | null;
     error?: string | null;
@@ -86,6 +87,11 @@ export type ZoomDriveSyncRunResponse = {
     filesUploaded?: number;
     filesSkipped?: number;
     zoomDeleted?: number;
+    pendingFiles?: number;
+    telegramMessagesSent?: number;
+    bytesTransferred?: number;
+    bytesTotal?: number;
+    progressPercent?: number;
   }>;
 };
 

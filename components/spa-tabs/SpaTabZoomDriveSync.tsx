@@ -56,6 +56,8 @@ function formatEventLine(event: NonNullable<ZoomDriveSyncRunResponse["eventsTail
     sync_started: "Sincronizacion iniciada",
     meeting_started: "Reunion detectada",
     meeting_prepared: "Reunion preparada",
+    file_transfer_started: "Transferencia iniciada",
+    file_transfer_progress: "Subiendo archivo",
     file_uploaded: "Archivo subido",
     file_error: "Error de transferencia",
     meeting_deleted_in_zoom: "Reunion eliminada en Zoom",
@@ -65,8 +67,12 @@ function formatEventLine(event: NonNullable<ZoomDriveSyncRunResponse["eventsTail
   const label = labelMap[event.event] || event.event || "evento";
   const topic = event.topic ? ` | ${event.topic}` : "";
   const file = event.fileName ? ` | ${event.fileName}` : "";
+  const progress =
+    event.event === "file_transfer_progress" && typeof event.progressPercent === "number"
+      ? ` | ${event.progressPercent}%`
+      : "";
   const error = event.error ? ` | ERROR: ${event.error}` : "";
-  return `${label}${topic}${file}${error}`;
+  return `${label}${topic}${file}${progress}${error}`;
 }
 
 function formatZoomGroupLabel(group: ZoomGroup): string {
@@ -475,6 +481,9 @@ export function SpaTabZoomDriveSync() {
                 <Chip variant="outlined" label={`${latestProgress.filesDownloaded} descargados`} />
                 <Chip variant="outlined" label={`${latestProgress.filesSkipped} omitidos`} />
                 <Chip variant="outlined" label={`${latestProgress.zoomDeleted} eliminados en Zoom`} />
+                {typeof latestProgress.progressPercent === "number" && latestProgress.progressPercent > 0 ? (
+                  <Chip color="info" variant="outlined" label={`Archivo actual: ${latestProgress.progressPercent}%`} />
+                ) : null}
               </Stack>
             ) : null}
             <Box
