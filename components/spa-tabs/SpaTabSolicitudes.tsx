@@ -1440,6 +1440,54 @@ export function SpaTabSolicitudes({
       .sort((left, right) => right.count - left.count);
   }, [visibleSolicitudes]);
 
+  function pickHighlightedInstance(
+    instances: NonNullable<Solicitud["zoomInstances"]>,
+    scope: SolicitudesListScope,
+    nowMs: number
+  ): NonNullable<Solicitud["zoomInstances"]>[number] | null {
+    if (instances.length === 0) return null;
+
+    if (scope === "ACTIVAS") {
+      return (
+        instances.find((instance) => isInstanceActiveOrUpcoming(instance, nowMs)) ??
+        instances.find((instance) => !isInstanceCancelledOrFinalizada(instance)) ??
+        instances[0] ??
+        null
+      );
+    }
+
+    return (
+      [...instances].reverse().find((instance) => !isInstanceCancelledOrFinalizada(instance)) ??
+      instances[instances.length - 1] ??
+      null
+    );
+  }
+
+  function pickEditableInstance(
+    instances: NonNullable<Solicitud["zoomInstances"]>,
+    isAdmin: boolean,
+    nowMs: number
+  ): NonNullable<Solicitud["zoomInstances"]>[number] | null {
+    const upcomingEditableInstance =
+      instances.find((instance) => {
+        if (!instance.eventId || isInstanceCancelledOrFinalizada(instance)) return false;
+        const endAt = new Date(resolveInstanceEndIso(instance)).getTime();
+        return Number.isFinite(endAt) && endAt > nowMs;
+      }) ?? null;
+
+    if (!isAdmin) {
+      return upcomingEditableInstance;
+    }
+
+    return (
+      upcomingEditableInstance ??
+      [...instances]
+        .reverse()
+        .find((instance) => Boolean(instance.eventId) && !isInstanceCancelledOrFinalizada(instance)) ??
+      null
+    );
+  }
+
   function mapInstanciaStatus(
     estadoEvento: string | null | undefined,
     zoomStatus: string | null | undefined
@@ -2828,20 +2876,21 @@ export function SpaTabSolicitudes({
                   const sortedInstances = [...instances].sort(
                     (left, right) => new Date(left.startTime).getTime() - new Date(right.startTime).getTime()
                   );
-                  const highlightedInstance =
-                    solicitudesListScope === "ACTIVAS"
-                      ? sortedInstances.find((instance) => new Date(instance.startTime).getTime() >= Date.now()) ??
-                        sortedInstances[0]
-                      : sortedInstances[sortedInstances.length - 1];
+                  const nowMs = Date.now();
+                  const highlightedInstance = pickHighlightedInstance(
+                    sortedInstances,
+                    solicitudesListScope,
+                    nowMs
+                  );
                   const instanceTimeLabel =
                     solicitudesListScope === "ACTIVAS" ? "Próxima reunión" : "Última reunión";
                   const hasEligibleInstanceForAssistance = sortedInstances.some((instance) =>
-                    isInstanceActiveOrUpcoming(instance, Date.now())
+                    isInstanceActiveOrUpcoming(instance, nowMs)
                   );
                   const assignedAssistantEmailsUpcoming = Array.from(
                     new Set(
                       sortedInstances
-                        .filter((instance) => isInstanceActiveOrUpcoming(instance, Date.now()))
+                        .filter((instance) => isInstanceActiveOrUpcoming(instance, nowMs))
                         .map((instance) => (instance.monitorEmail ?? "").trim().toLowerCase())
                         .filter((email) => isLikelyEmail(email))
                     )
@@ -2862,7 +2911,7 @@ export function SpaTabSolicitudes({
                   const assignedAssistantNamesUpcoming = Array.from(
                     new Set(
                       sortedInstances
-                        .filter((instance) => isInstanceActiveOrUpcoming(instance, Date.now()))
+                        .filter((instance) => isInstanceActiveOrUpcoming(instance, nowMs))
                         .map((instance) => (instance.monitorNombre ?? "").trim())
                         .filter(Boolean)
                     )
@@ -2909,20 +2958,7 @@ export function SpaTabSolicitudes({
                     !isSolicitudCancelled &&
                     (solicitudRequiresAssistance || hasEligibleInstanceForAssistance);
                   const isRecurringSolicitud = item.tipoInstancias !== "UNICA";
-                  const nowMs = Date.now();
-                  const upcomingEditableInstance =
-                    sortedInstances.find((instance) => {
-                      if (!instance.eventId) return false;
-                      const endAt = new Date(resolveInstanceEndIso(instance)).getTime();
-                      return Number.isFinite(endAt) && endAt > nowMs;
-                    }) ?? null;
-                  const latestEditableInstance =
-                    [...sortedInstances]
-                      .reverse()
-                      .find((instance) => Boolean(instance.eventId)) ?? null;
-                  const editableInstance = isAdminView
-                    ? upcomingEditableInstance ?? latestEditableInstance
-                    : upcomingEditableInstance;
+                  const editableInstance = pickEditableInstance(sortedInstances, isAdminView, nowMs);
                   const showEditMeetingAction =
                     canEditMeeting && (!isSolicitudCancelled || isAdminView);
                   const showReassignRecurringAction =

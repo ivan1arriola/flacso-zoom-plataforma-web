@@ -80,6 +80,28 @@ async function copyToClipboard(text: string): Promise<boolean> {
   }
 }
 
+function renderDocenteInfo(nombre?: string | null, email?: string | null) {
+  const displayName = (nombre ?? "").trim();
+  const displayEmail = (email ?? "").trim();
+
+  if (!displayName && !displayEmail) {
+    return <Typography variant="body2">-</Typography>;
+  }
+
+  if (!displayName || displayName.toLowerCase() === displayEmail.toLowerCase()) {
+    return <Typography variant="body2">{displayEmail || displayName}</Typography>;
+  }
+
+  return (
+    <Stack spacing={0.15}>
+      <Typography variant="body2">{displayName}</Typography>
+      <Typography variant="caption" color="text.secondary" sx={{ wordBreak: "break-word" }}>
+        {displayEmail}
+      </Typography>
+    </Stack>
+  );
+}
+
 export function SpaTabHistorico({
   pastMeetings,
   isLoadingPastMeetings,
@@ -357,7 +379,7 @@ export function SpaTabHistorico({
                           <Typography variant="caption" color="text.secondary">
                             Docente
                           </Typography>
-                          <Typography variant="body2">{meeting.docenteNombre || meeting.docenteEmail || "-"}</Typography>
+                          {renderDocenteInfo(meeting.docenteNombre, meeting.docenteEmail)}
                         </Box>
                         <Box>
                           <Typography variant="caption" color="text.secondary">

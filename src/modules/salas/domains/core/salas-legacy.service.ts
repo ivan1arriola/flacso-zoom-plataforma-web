@@ -30,6 +30,7 @@ import {
   normalizeWaitingRoomAllowlistEntries
 } from "@/src/lib/waiting-room-allowlist";
 import {
+  NOTIF_ACTIVITY_POSSIBLE_DUPLICATE_SOLICITUD,
   NOTIF_ACTIVITY_ZOOM_ASSISTANT_ASSIGNED,
   NOTIF_ACTIVITY_ZOOM_ASSISTANT_MEETING_UPDATED,
   NOTIF_ACTIVITY_ZOOM_ASSISTANT_UNASSIGNED,
@@ -108,6 +109,31 @@ type DashboardZoomCancellationAlert = {
 
 type DashboardSummaryOptions = {
   includeAdminZoomAlerts?: boolean;
+};
+
+type DuplicateSolicitudReviewDecision = "CASUALIDAD" | "DUPLICADA";
+
+type DuplicateSolicitudReviewState = {
+  version: 1;
+  candidateKey: string;
+  decision: DuplicateSolicitudReviewDecision;
+  reviewedByUserId: string;
+  reviewedAtIso: string;
+};
+
+type DuplicateSolicitudCandidate = {
+  candidateKey: string;
+  solicitudAId: string;
+  solicitudBId: string;
+  tituloA: string;
+  tituloB: string;
+  programaA: string | null;
+  programaB: string | null;
+  docenteLabel: string;
+  inicioA: Date;
+  inicioB: Date;
+  score: number;
+  reason: string;
 };
 
 type ProvisionedEventPlan = {
@@ -193,6 +219,9 @@ const SUGGESTION_SESSION_TTL_MS = 30 * 60 * 1000;
 const SUGGESTION_SESSION_KEY_PREFIX = "assignment_suggestion_session:";
 const SUGGESTION_SCORE_EPSILON = 1e-6;
 const ASSIGNMENT_CONFLICT_BUFFER_MS = 30 * 60 * 1000;
+const DUPLICATE_SOLICITUD_DETECTION_STATE_KEY = "duplicate_solicitud_detection_state:v1";
+const DUPLICATE_SOLICITUD_REVIEW_KEY_PREFIX = "duplicate_solicitud_review:v1:";
+const DUPLICATE_SOLICITUD_DETECTION_INTERVAL_MS = 10 * 60 * 1000;
 
 export type CreateSolicitudInput = {
   titulo: string;
@@ -393,6 +422,136 @@ function pickZoomHostAccountLabel(...candidates: Array<string | null | undefined
 
 function calculateEstimatedCost(minutes: number, rate: number): Prisma.Decimal {
   return new Prisma.Decimal((minutes / 60) * rate);
+}
+
+function duplicateSolicitudReviewKey(candidateKey: string): string {
+  return `${DUPLICATE_SOLICITUD_REVIEW_KEY_PREFIX}${candidateKey}`;
+}
+
+function normalizeComparableText(value?: string | null): string {
+  return (value ?? "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function buildComparableTitleTokens(value?: string | null): string[] {
+  return normalizeComparableText(value)
+    .split(" ")
+    .map((token) => token.trim())
+    .filter((token) => token.length >= 3);
+}
+
+function computeTitleSimilarityScore(left?: string | null, right?: string | null): number {
+  const normalizedLeft = normalizeComparableText(left);
+  const normalizedRight = normalizeComparableText(right);
+  if (!normalizedLeft || !normalizedRight) return 0;
+  if (normalizedLeft === normalizedRight) return 1;
+  if (normalizedLeft.includes(normalizedRight) || normalizedRight.includes(normalizedLeft)) {
+    return 0.94;
+  }
+
+  const leftTokens = new Set(buildComparableTitleTokens(left));
+  const rightTokens = new Set(buildComparableTitleTokens(right));
+  if (leftTokens.size === 0 || rightTokens.size === 0) return 0;
+
+  let overlap = 0;
+  for (const token of leftTokens) {
+    if (rightTokens.has(token)) overlap += 1;
+  }
+
+  const overlapRatio = overlap / Math.max(leftTokens.size, rightTokens.size);
+  if (overlapRatio >= 0.85) return 0.9;
+  if (overlapRatio >= 0.7) return 0.8;
+  if (overlapRatio >= 0.55) return 0.68;
+  if (overlapRatio >= 0.4) return 0.52;
+  return 0;
+}
+
+function computeStartTimeSimilarityScore(left: Date, right: Date): number {
+  const diffMinutes = Math.abs(left.getTime() - right.getTime()) / 60_000;
+  if (diffMinutes <= 10) return 1;
+  if (diffMinutes <= 20) return 0.85;
+  if (diffMinutes <= 40) return 0.65;
+  if (diffMinutes <= 90) return 0.35;
+  return 0;
+}
+
+function computeDurationSimilarityScore(
+  leftStart: Date,
+  leftEnd: Date,
+  rightStart: Date,
+  rightEnd: Date
+): number {
+  const leftMinutes = Math.max(1, Math.round((leftEnd.getTime() - leftStart.getTime()) / 60_000));
+  const rightMinutes = Math.max(1, Math.round((rightEnd.getTime() - rightStart.getTime()) / 60_000));
+  const diffMinutes = Math.abs(leftMinutes - rightMinutes);
+  if (diffMinutes <= 10) return 1;
+  if (diffMinutes <= 20) return 0.75;
+  if (diffMinutes <= 35) return 0.5;
+  return 0;
+}
+
+function computeDuplicateSolicitudScore(input: {
+  tituloA: string;
+  tituloB: string;
+  inicioA: Date;
+  inicioB: Date;
+  finA: Date;
+  finB: Date;
+}): number {
+  const titleScore = computeTitleSimilarityScore(input.tituloA, input.tituloB);
+  if (titleScore < 0.52) return 0;
+
+  const sameDayScore = toDayKey(input.inicioA, "America/Montevideo") === toDayKey(input.inicioB, "America/Montevideo")
+    ? 1
+    : 0;
+  const startScore = computeStartTimeSimilarityScore(input.inicioA, input.inicioB);
+  const durationScore = computeDurationSimilarityScore(input.inicioA, input.finA, input.inicioB, input.finB);
+
+  return titleScore * 0.7 + sameDayScore * 0.15 + startScore * 0.1 + durationScore * 0.05;
+}
+
+function buildDuplicateSolicitudReason(input: {
+  titleScore: number;
+  sameDay: boolean;
+  startDiffMinutes: number;
+}): string {
+  if (input.titleScore >= 0.94 && input.sameDay && input.startDiffMinutes <= 20) {
+    return "Titulos casi iguales y horario practicamente identico.";
+  }
+  if (input.titleScore >= 0.8 && input.sameDay) {
+    return "Titulos muy parecidos y ambas reuniones caen el mismo dia.";
+  }
+  if (input.titleScore >= 0.68 && input.sameDay && input.startDiffMinutes <= 40) {
+    return "Titulos parecidos con fecha y hora muy cercanas.";
+  }
+  return "Coincidencia parcial de nombre con fecha/horario cercanos.";
+}
+
+function normalizeDuplicateSolicitudReviewState(value: unknown): DuplicateSolicitudReviewState | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const record = value as Record<string, unknown>;
+  const candidateKey = typeof record.candidateKey === "string" ? record.candidateKey.trim() : "";
+  const reviewedByUserId = typeof record.reviewedByUserId === "string" ? record.reviewedByUserId.trim() : "";
+  const reviewedAtIso = typeof record.reviewedAtIso === "string" ? record.reviewedAtIso.trim() : "";
+  const decision =
+    record.decision === "CASUALIDAD" || record.decision === "DUPLICADA"
+      ? (record.decision as DuplicateSolicitudReviewDecision)
+      : null;
+  if (record.version !== 1 || !candidateKey || !reviewedByUserId || !reviewedAtIso || !decision) {
+    return null;
+  }
+  return {
+    version: 1,
+    candidateKey,
+    decision,
+    reviewedByUserId,
+    reviewedAtIso
+  };
 }
 
 function suggestionSessionKey(sessionId: string): string {
