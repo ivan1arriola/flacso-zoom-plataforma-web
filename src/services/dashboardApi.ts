@@ -30,6 +30,16 @@ export type DashboardNextMeeting = {
   } | null;
 };
 
+export type DashboardZoomCancellationAlert = {
+  eventId: string;
+  solicitudId: string;
+  titulo: string;
+  programaNombre: string | null;
+  startTime: string;
+  zoomMeetingId: string | null;
+  detection: "MEETING_NOT_FOUND" | "OCCURRENCE_DELETED";
+};
+
 export type DashboardSummary = {
   scope: "ADMINISTRADOR" | "DOCENTE" | "ASISTENTE_ZOOM" | "CONTADURIA";
   solicitudesTotales?: number;
@@ -60,12 +70,21 @@ export type DashboardSummary = {
   personasActivasMes?: number;
   horasVirtualesMes?: number;
   horasPresencialesMes?: number;
+  reunionesCanceladasEnZoom?: number;
+  alertasReunionesCanceladasEnZoom?: DashboardZoomCancellationAlert[];
   contaduriaHorasPorAsistente?: DashboardAccountingAssistantSummary[];
   nextMeeting?: DashboardNextMeeting | null;
 };
 
-export async function loadSummary(): Promise<DashboardSummary | null> {
-  const res = await fetch("/api/v1/dashboard", { cache: "no-store" });
+export async function loadSummary(options?: {
+  includeAdminZoomAlerts?: boolean;
+}): Promise<DashboardSummary | null> {
+  const params = new URLSearchParams();
+  if (options?.includeAdminZoomAlerts) {
+    params.set("includeAdminZoomAlerts", "1");
+  }
+  const qs = params.toString();
+  const res = await fetch(`/api/v1/dashboard${qs ? `?${qs}` : ""}`, { cache: "no-store" });
   if (!res.ok) return null;
   const json = (await res.json()) as { summary: DashboardSummary };
   return json.summary;

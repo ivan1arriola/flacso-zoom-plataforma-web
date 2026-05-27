@@ -96,6 +96,20 @@ type ZoomMeetingSnapshot = {
   rawPayload: Prisma.InputJsonValue | undefined;
 };
 
+type DashboardZoomCancellationAlert = {
+  eventId: string;
+  solicitudId: string;
+  titulo: string;
+  programaNombre: string | null;
+  startTime: string;
+  zoomMeetingId: string | null;
+  detection: "MEETING_NOT_FOUND" | "OCCURRENCE_DELETED";
+};
+
+type DashboardSummaryOptions = {
+  includeAdminZoomAlerts?: boolean;
+};
+
 type ProvisionedEventPlan = {
   inicio: Date;
   fin: Date;
@@ -1916,6 +1930,158 @@ function findAnyZoomOccurrenceByStart(
   return best;
 }
 
+async function detectDashboardZoomCancellationAlerts(
+  now: Date
+): Promise<{ count: number; alerts: DashboardZoomCancellationAlert[] }> {
+  const lookaheadEnd = new Date(now.getTime() + 30 * 24 * 60 * 60_000);
+  const maxMeetingReads = 80;
+  const maxAlertDetails = 5;
+
+  const events = await db.eventoZoom.findMany({
+    where: {
+      inicioProgramadoAt: {
+        gt: now,
+        lt: lookaheadEnd
+      },
+      estadoEvento: {
+        notIn: [EstadoEventoZoom.CANCELADO, EstadoEventoZoom.FINALIZADO]
+      },
+      OR: [
+        { zoomMeetingId: { not: null } },
+        { zoomJoinUrl: { not: null } },
+        { solicitud: { meetingPrincipalId: { not: null } } }
+      ]
+    },
+    select: {
+      id: true,
+      solicitudSalaId: true,
+      inicioProgramadoAt: true,
+      zoomMeetingId: true,
+      zoomJoinUrl: true,
+      solicitud: {
+        select: {
+          titulo: true,
+          programaNombre: true,
+          meetingPrincipalId: true
+        }
+      }
+    },
+    orderBy: {
+      inicioProgramadoAt: "asc"
+    },
+    take: 240
+  });
+
+  if (events.length === 0) {
+    return { count: 0, alerts: [] };
+  }
+
+  let zoomClient: ZoomMeetingsClient;
+  try {
+    zoomClient = await ZoomMeetingsClient.fromAccountCredentials();
+  } catch (error) {
+    logger.warn("No se pudo inicializar Zoom para alertas del dashboard.", {
+      error: error instanceof Error ? error.message : String(error)
+    });
+    return { count: 0, alerts: [] };
+  }
+
+  type CandidateEvent = {
+    eventId: string;
+    solicitudId: string;
+    titulo: string;
+    programaNombre: string | null;
+    startAt: Date;
+    zoomMeetingId: string;
+  };
+
+  const candidatesByMeetingId = new Map<string, CandidateEvent[]>();
+  for (const event of events) {
+    const resolvedMeetingId =
+      normalizeZoomMeetingId(event.zoomMeetingId) ??
+      normalizeZoomMeetingId(event.solicitud.meetingPrincipalId) ??
+      extractZoomMeetingIdFromJoinUrl(event.zoomJoinUrl);
+    if (!resolvedMeetingId) continue;
+
+    const bucket = candidatesByMeetingId.get(resolvedMeetingId) ?? [];
+    bucket.push({
+      eventId: event.id,
+      solicitudId: event.solicitudSalaId,
+      titulo: event.solicitud.titulo,
+      programaNombre: event.solicitud.programaNombre ?? null,
+      startAt: event.inicioProgramadoAt,
+      zoomMeetingId: resolvedMeetingId
+    });
+    candidatesByMeetingId.set(resolvedMeetingId, bucket);
+  }
+
+  if (candidatesByMeetingId.size === 0) {
+    return { count: 0, alerts: [] };
+  }
+
+  const inspectedMeetingIds = Array.from(candidatesByMeetingId.keys()).slice(0, maxMeetingReads);
+  const snapshotsByMeetingId = new Map<string, ZoomMeetingSnapshot | null>();
+
+  for (const meetingId of inspectedMeetingIds) {
+    try {
+      const snapshot = await fetchZoomMeetingSnapshot(zoomClient, meetingId);
+      snapshotsByMeetingId.set(meetingId, snapshot);
+    } catch (error) {
+      logger.warn("No se pudo consultar Zoom para una alerta del dashboard.", {
+        meetingId,
+        error: error instanceof Error ? error.message : String(error)
+      });
+    }
+  }
+
+  const alerts: DashboardZoomCancellationAlert[] = [];
+  for (const meetingId of inspectedMeetingIds) {
+    const snapshot = snapshotsByMeetingId.get(meetingId);
+    if (snapshot === undefined) continue;
+
+    const candidates = candidatesByMeetingId.get(meetingId) ?? [];
+    if (snapshot === null) {
+      for (const candidate of candidates) {
+        alerts.push({
+          eventId: candidate.eventId,
+          solicitudId: candidate.solicitudId,
+          titulo: candidate.titulo,
+          programaNombre: candidate.programaNombre,
+          startTime: candidate.startAt.toISOString(),
+          zoomMeetingId: candidate.zoomMeetingId,
+          detection: "MEETING_NOT_FOUND"
+        });
+      }
+      continue;
+    }
+
+    for (const candidate of candidates) {
+      const activeOccurrence = findZoomOccurrenceByStart(snapshot.instances, candidate.startAt);
+      if (activeOccurrence) continue;
+
+      const anyOccurrence = findAnyZoomOccurrenceByStart(snapshot.instances, candidate.startAt);
+      if (anyOccurrence?.status !== "deleted") continue;
+
+      alerts.push({
+        eventId: candidate.eventId,
+        solicitudId: candidate.solicitudId,
+        titulo: candidate.titulo,
+        programaNombre: candidate.programaNombre,
+        startTime: candidate.startAt.toISOString(),
+        zoomMeetingId: candidate.zoomMeetingId,
+        detection: "OCCURRENCE_DELETED"
+      });
+    }
+  }
+
+  alerts.sort((left, right) => new Date(left.startTime).getTime() - new Date(right.startTime).getTime());
+
+  return {
+    count: alerts.length,
+    alerts: alerts.slice(0, maxAlertDetails)
+  };
+}
+
 async function createZoomMeetingForSolicitud(params: {
   accountOwnerEmail: string;
   input: CreateSolicitudInput;
@@ -3424,7 +3590,7 @@ async function alignSpecificDatesScheduleWithZoom(params: {
 }
 
 export class SalasLegacyService {
-  async getDashboardSummary(user: SessionUser) {
+  async getDashboardSummary(user: SessionUser, options?: DashboardSummaryOptions) {
     const now = new Date();
 
     if (user.role === UserRole.ADMINISTRADOR) {
@@ -3434,6 +3600,9 @@ export class SalasLegacyService {
       const nextMonthStart = new Date(
         Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1, 0, 0, 0, 0)
       );
+      const zoomCancellationAlertsPromise = options?.includeAdminZoomAlerts
+        ? detectDashboardZoomCancellationAlerts(now)
+        : Promise.resolve({ count: 0, alerts: [] as DashboardZoomCancellationAlert[] });
       const [
         solicitudesTotales,
         solicitudesActivas,
@@ -3445,7 +3614,8 @@ export class SalasLegacyService {
         agendaAbierta,
         eventosSinAsistencia7d,
         eventosCriticosSinLinkZoom,
-        eventsForCollisionCheck
+        eventsForCollisionCheck,
+        zoomCancellationAlerts
       ] =
         await Promise.all([
           db.solicitudSala.count(),
@@ -3571,7 +3741,8 @@ export class SalasLegacyService {
             orderBy: {
               inicioProgramadoAt: "asc"
             }
-          })
+          }),
+          zoomCancellationAlertsPromise
         ]);
 
       const byAccount = new Map<string, Array<{
@@ -3626,7 +3797,13 @@ export class SalasLegacyService {
         eventosSinCobertura,
         agendaAbierta,
         eventosCriticosSinAsistencia: eventosSinAsistencia7d,
-        eventosCriticosSinLinkZoom
+        eventosCriticosSinLinkZoom,
+        reunionesCanceladasEnZoom: options?.includeAdminZoomAlerts
+          ? zoomCancellationAlerts.count
+          : undefined,
+        alertasReunionesCanceladasEnZoom: options?.includeAdminZoomAlerts
+          ? zoomCancellationAlerts.alerts
+          : undefined
       };
     }
 

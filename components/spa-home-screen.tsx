@@ -1,6 +1,6 @@
 "use client";
 
-import { type FormEvent, useEffect, useMemo, useState } from "react";
+import { type FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { signIn } from "next-auth/react";
 import {
   Alert,
@@ -291,6 +291,7 @@ function resolveUserAccessEmails(
 }
 
 export function SpaHomeScreen() {
+  const hasBootstrappedRef = useRef(false);
   const [programas, setProgramas] = useState<Programa[]>([]);
   const [isCreatingPrograma, setIsCreatingPrograma] = useState(false);
   const [isRefreshingProgramas, setIsRefreshingProgramas] = useState(false);
@@ -495,6 +496,14 @@ export function SpaHomeScreen() {
     () => requesterAccessEmails[0] ?? user?.email?.trim().toLowerCase() ?? "",
     [requesterAccessEmails, user?.email]
   );
+  function buildSummaryLoadOptions(
+    role: ViewRole | "" = effectiveRole,
+    targetTab: string = tab
+  ) {
+    return {
+      includeAdminZoomAlerts: role === "ADMINISTRADOR" && targetTab === "dashboard"
+    };
+  }
   const docenteLinkedEmailOptions = useMemo(() => {
     if (effectiveRole !== "ADMINISTRADOR") {
       return requesterAccessEmails;
@@ -802,13 +811,14 @@ export function SpaHomeScreen() {
         image: meJson.user.image ?? ""
       });
       const presentationRole = resolveEffectiveRoleForUser(meJson.user.role);
+      const initialTab = requestedTab ?? getDefaultTabForRole(presentationRole || "ADMINISTRADOR");
       if (!requestedTab) {
-        setTab(getDefaultTabForRole(presentationRole || "ADMINISTRADOR"));
+        setTab(initialTab);
       }
 
       const loaders: Array<Promise<void>> = [
         (async () => {
-          const summary = await loadSummary();
+          const summary = await loadSummary(buildSummaryLoadOptions(presentationRole, initialTab));
           if (summary) setSummary(summary);
         })()
       ];
@@ -896,6 +906,7 @@ export function SpaHomeScreen() {
 
       await Promise.all(loaders);
     } finally {
+      hasBootstrappedRef.current = true;
       setLoading(false);
     }
   }
@@ -1056,10 +1067,16 @@ export function SpaHomeScreen() {
     setTab(requestedTab);
   }, [requestedTab]);
 
+  useEffect(() => {
+    if (!hasBootstrappedRef.current) return;
+    if (tab !== "dashboard") return;
+    void refreshSummary();
+  }, [tab, effectiveRole]);
+
   async function refreshSummary() {
     setIsLoadingSummary(true);
     try {
-      const data = await loadSummary();
+      const data = await loadSummary(buildSummaryLoadOptions());
       if (data) setSummary(data);
     } finally {
       setIsLoadingSummary(false);
@@ -1079,7 +1096,7 @@ export function SpaHomeScreen() {
     setIsLoadingSolicitudes(true);
     try {
       const [summaryData, solicitudesData, agendaData, assignmentData, manualData] = await Promise.all([
-        loadSummary(),
+        loadSummary(buildSummaryLoadOptions()),
         loadSolicitudes(),
         loadAgendaLibre(),
         loadAssignmentBoard(),
@@ -1851,7 +1868,10 @@ export function SpaHomeScreen() {
       }
 
       setMessage("Asignacion registrada.");
-      const [assignmentData, summaryData] = await Promise.all([loadAssignmentBoard(), loadSummary()]);
+      const [assignmentData, summaryData] = await Promise.all([
+        loadAssignmentBoard(),
+        loadSummary(buildSummaryLoadOptions())
+      ]);
       if (assignmentData) {
         setAssignmentBoardEvents(assignmentData.events ?? []);
         setAssignableAssistants(assignmentData.assistants ?? []);
@@ -1923,7 +1943,10 @@ export function SpaHomeScreen() {
       }
 
       setMessage("Asistente desasignado. La reunión volvió a Pendientes.");
-      await Promise.all([loadAssignmentBoard(), loadSummary()]).then(([assignmentData, summaryData]) => {
+      await Promise.all([
+        loadAssignmentBoard(),
+        loadSummary(buildSummaryLoadOptions())
+      ]).then(([assignmentData, summaryData]) => {
         if (assignmentData) {
           setAssignmentBoardEvents(assignmentData.events ?? []);
           setAssignableAssistants(assignmentData.assistants ?? []);
@@ -2447,7 +2470,7 @@ export function SpaHomeScreen() {
       setMessage(`Reunion registrada correctamente: ${response.solicitudId ?? ""}`);
       const [solicitudesData, summaryData, meetingsData] = await Promise.all([
         loadSolicitudes(),
-        loadSummary(),
+        loadSummary(buildSummaryLoadOptions()),
         loadPastMeetings()
       ]);
       if (solicitudesData) setSolicitudes(solicitudesData);

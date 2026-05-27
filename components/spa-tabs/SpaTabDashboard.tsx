@@ -307,12 +307,21 @@ async function copyTextToClipboard(value: string): Promise<boolean> {
 }
 
 function deriveAdminStatus(summary: DashboardSummary): DashboardStatus {
+  const reunionesCanceladasEnZoom = metricValue(summary, "reunionesCanceladasEnZoom");
   const manualPendings = metricValue(summary, "manualPendings");
   const solicitudesNoResueltas = metricValue(summary, "solicitudesNoResueltas");
   const colisionesZoom7d = metricValue(summary, "colisionesZoom7d");
   const eventosSinAsistencia7d = metricValue(summary, "eventosSinAsistencia7d");
   
   const totalManual = manualPendings + solicitudesNoResueltas;
+
+  if (reunionesCanceladasEnZoom > 0) {
+    return {
+      label: "Crítico",
+      color: "error",
+      message: `Hay ${reunionesCanceladasEnZoom} reunión(es) activa(s) en la app que ya fueron canceladas o eliminadas en Zoom.`
+    };
+  }
 
   if (colisionesZoom7d > 0) {
     return {
@@ -343,6 +352,14 @@ function deriveAdminStatus(summary: DashboardSummary): DashboardStatus {
     color: "success",
     message: "El sistema se encuentra operando normalmente sin bloqueos críticos."
   };
+}
+
+function buildZoomCancellationDetectionLabel(
+  alert: NonNullable<DashboardSummary["alertasReunionesCanceladasEnZoom"]>[number]
+): string {
+  return alert.detection === "MEETING_NOT_FOUND"
+    ? "El meeting ya no existe en Zoom."
+    : "La fecha fue eliminada dentro de la recurrencia en Zoom.";
 }
 
 function deriveAssistantStatus(summary: DashboardSummary): DashboardStatus {
@@ -1624,6 +1641,84 @@ export function SpaTabDashboard({
             Atención Requerida
           </Typography>
           <Grid container spacing={2}>
+            {summary.reunionesCanceladasEnZoom && summary.reunionesCanceladasEnZoom > 0 ? (
+              <Grid size={{ xs: 12, lg: 6 }}>
+                <Card
+                  variant="outlined"
+                  sx={{
+                    height: "100%",
+                    borderColor: "error.main",
+                    bgcolor: isDarkMode ? alpha(theme.palette.error.main, 0.16) : alpha(theme.palette.error.main, 0.08),
+                    borderRadius: 3,
+                    borderLeft: "8px solid",
+                    borderLeftColor: "error.main"
+                  }}
+                >
+                  <CardContent>
+                    <Stack direction="row" spacing={2} alignItems="center">
+                      <Box sx={{ p: 1, borderRadius: 2, bgcolor: "error.main", color: "white" }}>
+                        <WarningAmberIcon />
+                      </Box>
+                      <Box>
+                        <Typography variant="subtitle2" sx={{ fontWeight: 800, color: toneColor("error") }}>
+                          Canceladas Desde Zoom
+                        </Typography>
+                        <Typography variant="h3" sx={{ fontWeight: 900, color: "error.main" }}>
+                          {summary.reunionesCanceladasEnZoom}
+                        </Typography>
+                      </Box>
+                    </Stack>
+                    <Typography variant="body2" sx={{ mt: 1.5, color: toneColor("error"), fontWeight: 500 }}>
+                      Reuniones futuras que siguen activas en la app pero ya no están disponibles en Zoom.
+                    </Typography>
+                    {(summary.alertasReunionesCanceladasEnZoom ?? []).length > 0 ? (
+                      <Stack spacing={1} sx={{ mt: 1.8 }}>
+                        {summary.alertasReunionesCanceladasEnZoom?.map((alert) => (
+                          <Paper
+                            key={`${alert.eventId}:${alert.startTime}`}
+                            variant="outlined"
+                            sx={{
+                              p: 1.2,
+                              borderRadius: 2,
+                              borderColor: alpha(theme.palette.error.main, 0.22),
+                              bgcolor: alpha(theme.palette.background.paper, isDarkMode ? 0.22 : 0.9)
+                            }}
+                          >
+                            <Stack spacing={0.4}>
+                              <Typography variant="body2" sx={{ fontWeight: 700 }}>
+                                {alert.titulo}
+                              </Typography>
+                              <Typography variant="caption" color="text.secondary">
+                                {formatZoomDateTime(alert.startTime)}
+                              </Typography>
+                              {alert.programaNombre ? (
+                                <Typography variant="caption" color="text.secondary">
+                                  Programa: {alert.programaNombre}
+                                </Typography>
+                              ) : null}
+                              {alert.zoomMeetingId ? (
+                                <Typography variant="caption" color="text.secondary">
+                                  Meeting ID: {alert.zoomMeetingId}
+                                </Typography>
+                              ) : null}
+                              <Typography variant="caption" sx={{ color: toneColor("error"), fontWeight: 600 }}>
+                                {buildZoomCancellationDetectionLabel(alert)}
+                              </Typography>
+                            </Stack>
+                          </Paper>
+                        ))}
+                        {(summary.reunionesCanceladasEnZoom - (summary.alertasReunionesCanceladasEnZoom?.length ?? 0)) > 0 ? (
+                          <Typography variant="caption" color="text.secondary" sx={{ pl: 0.2 }}>
+                            +{summary.reunionesCanceladasEnZoom - (summary.alertasReunionesCanceladasEnZoom?.length ?? 0)} alerta(s) adicional(es).
+                          </Typography>
+                        ) : null}
+                      </Stack>
+                    ) : null}
+                  </CardContent>
+                </Card>
+              </Grid>
+            ) : null}
+
             {summary.colisionesZoom7d && summary.colisionesZoom7d > 0 ? (
               <Grid size={{ xs: 12, md: 4 }}>
                 <Card

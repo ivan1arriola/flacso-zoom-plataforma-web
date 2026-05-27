@@ -170,6 +170,7 @@ type EditMeetingDialogState = {
   titulo: string;
   eventoId: string;
   isRecurring: boolean;
+  selectedInstanceLabel: string;
 };
 
 type EditMeetingDurationDialogState = {
@@ -844,7 +845,8 @@ export function SpaTabSolicitudes({
       id: solicitud.id,
       titulo: solicitud.titulo,
       eventoId: eventId,
-      isRecurring
+      isRecurring,
+      selectedInstanceLabel: formatFullInstanceDateTime(instance)
     });
     setEditMeetingForm({
       titulo: solicitud.titulo,
@@ -1504,6 +1506,10 @@ export function SpaTabSolicitudes({
             const instanceEndMs = resolveInstanceEndMs(instance);
             const hasEndedByTime = instanceEndMs !== null && Number.isFinite(instanceEndMs) && instanceEndMs <= Date.now();
             const isFinalizedInstance = instance.estadoEvento === "FINALIZADO";
+            const canEditThisInstance =
+              canEditMeeting &&
+              Boolean(instance.eventId) &&
+              (isAdminView || (!isInstanceCancelled && !hasEndedByTime && !isFinalizedInstance));
             const canOpenDurationEditor =
               canEditMeetingDuration &&
               Boolean(instance.eventId) &&
@@ -1545,6 +1551,38 @@ export function SpaTabSolicitudes({
                   </Stack>
                 </Box>
                 <Stack direction={{ xs: "column", sm: "row" }} spacing={1}>
+                  {canEditMeeting ? (
+                    <Tooltip
+                      title={
+                        !instance.eventId
+                          ? "Esta fecha no tiene un evento interno para editar."
+                          : !isAdminView && isInstanceCancelled
+                            ? "No se puede editar una fecha cancelada."
+                            : !isAdminView && (hasEndedByTime || isFinalizedInstance)
+                              ? "Solo se pueden editar fechas futuras."
+                              : "Editar esta fecha puntual."
+                      }
+                    >
+                      <span>
+                        <Button
+                          type="button"
+                          size="small"
+                          variant="outlined"
+                          color="primary"
+                          startIcon={<EditOutlinedIcon fontSize="small" />}
+                          disabled={
+                            !canEditThisInstance ||
+                            isSubmittingEditMeeting ||
+                            cancellingInstanciaKey === instanceKey ||
+                            isRestoreInProgress
+                          }
+                          onClick={() => openEditMeetingDialog(item, instance)}
+                        >
+                          Editar fecha
+                        </Button>
+                      </span>
+                    </Tooltip>
+                  ) : null}
                   {canScheduleThisInstance && (
                     <Button
                       type="button"
@@ -2995,7 +3033,7 @@ export function SpaTabSolicitudes({
                                   title={
                                     canEditSelectedMeeting
                                       ? isRecurringSolicitud
-                                        ? "Editar datos de toda la recurrencia."
+                                        ? "Abre la proxima fecha editable del pedido. Para mover una fecha puntual, usa 'Editar fecha' en su fila."
                                         : "Editar datos de la reunión."
                                       : isAdminView
                                         ? "No hay una fecha con evento interno para editar."
@@ -3014,7 +3052,7 @@ export function SpaTabSolicitudes({
                                       disabled={!canEditSelectedMeeting || isSubmittingEditMeeting}
                                       sx={{ borderRadius: 2, textTransform: "none", fontWeight: 600 }}
                                     >
-                                      Editar
+                                      {isRecurringSolicitud ? "Editar próxima" : "Editar"}
                                     </Button>
                                   </span>
                                 </Tooltip>
@@ -3423,10 +3461,30 @@ export function SpaTabSolicitudes({
           <Typography variant="body2" color="text.secondary" sx={{ mb: 1.2 }}>
             Pedido: {editMeetingDialogSolicitud?.titulo || "-"}
           </Typography>
-          {editMeetingDialogSolicitud?.isRecurring ? (
-            <Typography variant="caption" color="info.main" sx={{ display: "block", mb: 1.2, fontWeight: 600 }}>
-              Modificando una instancia específica de la serie.
+          {editMeetingDialogSolicitud?.selectedInstanceLabel ? (
+            <Typography variant="body2" color="text.secondary" sx={{ mb: 1.2 }}>
+              Fecha seleccionada: {editMeetingDialogSolicitud.selectedInstanceLabel}
             </Typography>
+          ) : null}
+          {editMeetingDialogSolicitud?.isRecurring ? (
+            <Box
+              sx={{
+                mb: 1.5,
+                px: 1.4,
+                py: 1.1,
+                borderRadius: 2,
+                bgcolor: (theme) => alpha(theme.palette.info.main, 0.08),
+                border: "1px solid",
+                borderColor: (theme) => alpha(theme.palette.info.main, 0.22)
+              }}
+            >
+              <Typography variant="caption" color="info.main" sx={{ display: "block", fontWeight: 700 }}>
+                Estás modificando una fecha puntual de esta serie.
+              </Typography>
+              <Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: 0.4 }}>
+                Tema, programa, responsable y modalidad impactan en todo el pedido. Inicio y fin cambian solo la fecha seleccionada.
+              </Typography>
+            </Box>
           ) : null}
           <TextField
             autoFocus
@@ -3560,6 +3618,11 @@ export function SpaTabSolicitudes({
               }
               InputLabelProps={{ shrink: true }}
               disabled={isSubmittingEditMeeting}
+              helperText={
+                editMeetingDialogSolicitud?.isRecurring
+                  ? "Este horario se aplicará solo a la fecha seleccionada."
+                  : undefined
+              }
             />
             <TextField
               label="Fin"
@@ -3575,6 +3638,11 @@ export function SpaTabSolicitudes({
               }
               InputLabelProps={{ shrink: true }}
               disabled={isSubmittingEditMeeting}
+              helperText={
+                editMeetingDialogSolicitud?.isRecurring
+                  ? "Este horario se aplicará solo a la fecha seleccionada."
+                  : undefined
+              }
             />
           </Stack>
 
