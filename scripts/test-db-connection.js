@@ -4,6 +4,7 @@ const prisma = new PrismaClient();
 
 async function main() {
   console.log("⚙️ [Deploy] Ejecutando test de integración de Base de Datos...");
+  console.log("DATABASE_URL presente en env:", !!process.env.DATABASE_URL);
   try {
     await prisma.$connect();
     await prisma.$queryRaw`SELECT 1 as result`;
