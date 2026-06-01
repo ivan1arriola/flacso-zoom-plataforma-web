@@ -16,7 +16,9 @@ const bodySchema = z
     inicioProgramadoAt: z.string().trim().min(1).optional(),
     finProgramadoAt: z.string().trim().min(1).optional(),
     timezone: z.string().trim().max(80).optional().or(z.literal("")),
-    modalidadReunion: z.enum(["VIRTUAL", "HIBRIDA"]).optional()
+    modalidadReunion: z.enum(["VIRTUAL", "HIBRIDA"]).optional(),
+    targetOccurrenceId: z.string().trim().optional(),
+    targetPreviousStart: z.string().trim().optional()
   })
   .refine(
     (value) =>
@@ -70,7 +72,9 @@ export async function PATCH(request: Request, context: Params) {
           ? parsed.data.finProgramadoAt
           : undefined,
       timezone: typeof parsed.data.timezone === "string" ? parsed.data.timezone : undefined,
-      modalidadReunion: parsed.data.modalidadReunion
+      modalidadReunion: parsed.data.modalidadReunion,
+      targetOccurrenceId: parsed.data.targetOccurrenceId,
+      targetPreviousStart: parsed.data.targetPreviousStart
     });
 
     return NextResponse.json({ result });

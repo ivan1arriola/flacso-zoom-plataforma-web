@@ -9906,6 +9906,8 @@ export class SalasLegacyService {
       finProgramadoAt?: string;
       timezone?: string;
       modalidadReunion?: ModalidadReunion;
+      targetOccurrenceId?: string;
+      targetPreviousStart?: string;
     }
   ) {
     const event = await db.eventoZoom.findUnique({
@@ -10000,7 +10002,7 @@ export class SalasLegacyService {
     const previousResponsible = event.solicitud.responsableNombre ?? "";
     const previousDescription = event.solicitud.descripcion ?? "";
     const previousTimezone = event.timezone || event.solicitud.timezone || "America/Montevideo";
-    const previousStart = event.inicioProgramadoAt;
+    const previousStart = input.targetPreviousStart ? new Date(input.targetPreviousStart) : event.inicioProgramadoAt;
     const previousEnd = event.finProgramadoAt;
 
     const hasStartInput = typeof input.inicioProgramadoAt === "string" && input.inicioProgramadoAt.trim().length > 0;
@@ -10218,7 +10220,7 @@ export class SalasLegacyService {
                   ? findZoomOccurrenceByStart(snapshot.instances, previousStart) ??
                     findAnyZoomOccurrenceByStart(snapshot.instances, previousStart)
                   : null;
-              const occurrenceId = matchedOccurrence?.occurrenceId ?? null;
+              const occurrenceId = input.targetOccurrenceId || matchedOccurrence?.occurrenceId || null;
               if (!occurrenceId) {
                 throw new Error(
                   "No se encontro occurrence_id en Zoom para actualizar el horario de esta instancia."

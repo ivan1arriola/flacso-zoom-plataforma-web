@@ -1505,6 +1505,8 @@ export function SpaHomeScreen() {
     inicioProgramadoAt?: string;
     finProgramadoAt?: string;
     modalidadReunion?: string;
+    targetOccurrenceId?: string;
+    targetPreviousStart?: string;
   }): Promise<boolean> {
     setMessage("");
 
@@ -1528,7 +1530,9 @@ export function SpaHomeScreen() {
         responsableNombre: normalizedResponsible || undefined,
         inicioProgramadoAt: input.inicioProgramadoAt,
         finProgramadoAt: input.finProgramadoAt,
-        modalidadReunion: input.modalidadReunion
+        modalidadReunion: input.modalidadReunion,
+        targetOccurrenceId: input.targetOccurrenceId,
+        targetPreviousStart: input.targetPreviousStart
       });
 
       if (!updateMeetingResponse.success) {

@@ -138,6 +138,8 @@ export async function updateUpcomingZoomEvent(
     finProgramadoAt?: string;
     timezone?: string;
     modalidadReunion?: string;
+    targetOccurrenceId?: string;
+    targetPreviousStart?: string;
   }
 ): Promise<{
   success: boolean;

@@ -114,6 +114,8 @@ interface SpaTabSolicitudesProps {
     inicioProgramadoAt?: string;
     finProgramadoAt?: string;
     modalidadReunion?: string;
+    targetOccurrenceId?: string;
+    targetPreviousStart?: string;
   }) => Promise<boolean>;
   canEditMeetingDuration: boolean;
   updatingMeetingDurationEventId: string | null;
@@ -171,6 +173,8 @@ type EditMeetingDialogState = {
   eventoId: string;
   isRecurring: boolean;
   selectedInstanceLabel: string;
+  targetOccurrenceId?: string;
+  targetPreviousStart?: string;
 };
 
 type EditMeetingDurationDialogState = {
@@ -846,7 +850,9 @@ export function SpaTabSolicitudes({
       titulo: solicitud.titulo,
       eventoId: eventId,
       isRecurring,
-      selectedInstanceLabel: formatFullInstanceDateTime(instance)
+      selectedInstanceLabel: formatFullInstanceDateTime(instance),
+      targetOccurrenceId: instance.occurrenceId ?? undefined,
+      targetPreviousStart: instance.startTime
     });
     setEditMeetingForm({
       titulo: solicitud.titulo,
@@ -889,6 +895,8 @@ export function SpaTabSolicitudes({
       const success = await onEditMeeting({
         solicitudId: editMeetingDialogSolicitud.id,
         eventoId: editMeetingDialogSolicitud.eventoId,
+        targetOccurrenceId: editMeetingDialogSolicitud.targetOccurrenceId,
+        targetPreviousStart: editMeetingDialogSolicitud.targetPreviousStart,
         titulo: normalizedTitle,
         programaNombre: normalizedProgram,
         responsableNombre: normalizedResponsible || undefined,
@@ -1554,13 +1562,15 @@ export function SpaTabSolicitudes({
             const instanceEndMs = resolveInstanceEndMs(instance);
             const hasEndedByTime = instanceEndMs !== null && Number.isFinite(instanceEndMs) && instanceEndMs <= Date.now();
             const isFinalizedInstance = instance.estadoEvento === "FINALIZADO";
+            const fallbackEventId = item.zoomInstances?.find(i => i.eventId)?.eventId ?? "";
+            const eventId = (instance.eventId || fallbackEventId).trim();
             const canEditThisInstance =
               canEditMeeting &&
-              Boolean(instance.eventId) &&
+              Boolean(eventId) &&
               (isAdminView || (!isInstanceCancelled && !hasEndedByTime && !isFinalizedInstance));
             const canOpenDurationEditor =
               canEditMeetingDuration &&
-              Boolean(instance.eventId) &&
+              Boolean(eventId) &&
               (hasEndedByTime || isFinalizedInstance) &&
               !isInstanceCancelled;
             const isSubmittingDurationThisInstance =
@@ -1602,7 +1612,7 @@ export function SpaTabSolicitudes({
                   {canEditMeeting ? (
                     <Tooltip
                       title={
-                        !instance.eventId
+                        !eventId
                           ? "Esta fecha no tiene un evento interno para editar."
                           : !isAdminView && isInstanceCancelled
                             ? "No se puede editar una fecha cancelada."
@@ -1624,7 +1634,7 @@ export function SpaTabSolicitudes({
                             cancellingInstanciaKey === instanceKey ||
                             isRestoreInProgress
                           }
-                          onClick={() => openEditMeetingDialog(item, instance)}
+                          onClick={() => openEditMeetingDialog(item, { ...instance, eventId })}
                         >
                           Editar fecha
                         </Button>
