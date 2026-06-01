@@ -22,7 +22,6 @@ type ZoomRecordingNotificationInput = {
   meetingId?: string | null;
   meetingUuid?: string | null;
   topic?: string | null;
-  autoSyncEnabled?: boolean;
 };
 
 type DeviceContext = {
@@ -153,7 +152,6 @@ function buildZoomRecordingBody(input: ZoomRecordingNotificationInput): string {
   if (meetingUuid) lines.push(`Meeting UUID: ${meetingUuid}`);
   if (accountId) lines.push(`Cuenta Zoom: ${accountId}`);
   if (occurredAt) lines.push(`Fecha del evento: ${occurredAt}`);
-  lines.push(`Auto-sync Drive: ${input.autoSyncEnabled ? "Activo" : "Inactivo"}`);
 
   return lines.join("\n");
 }

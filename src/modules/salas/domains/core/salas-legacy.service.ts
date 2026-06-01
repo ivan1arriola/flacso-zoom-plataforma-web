@@ -12283,4 +12283,85 @@ export class SalasLegacyService {
 
     return created;
   }
+
+  async renotifyOpenAgenda(admin: SessionUser) {
+    if (admin.role !== UserRole.ADMINISTRADOR) {
+      throw new Error("No tienes permisos para ejecutar esta accion.");
+    }
+
+    const events = await db.eventoZoom.findMany({
+      where: {
+        requiereAsistencia: true,
+        estadoCobertura: EstadoCoberturaSoporte.REQUERIDO_SIN_ASIGNAR,
+        inicioProgramadoAt: { gt: new Date() },
+        estadoEvento: { not: EstadoEventoZoom.CANCELADO }
+      },
+      include: {
+        solicitud: true,
+        cuentaZoom: { select: { ownerEmail: true, nombreCuenta: true } }
+      },
+      orderBy: { inicioProgramadoAt: "asc" }
+    });
+
+    if (events.length === 0) {
+      return { renotified: 0, message: "No hay instancias pendientes de asignacion en el futuro." };
+    }
+
+    const eventsBySolicitud = new Map<string, typeof events>();
+    for (const event of events) {
+      const list = eventsBySolicitud.get(event.solicitudSalaId) || [];
+      list.push(event);
+      eventsBySolicitud.set(event.solicitudSalaId, list);
+    }
+
+    let renotifiedCount = 0;
+    for (const [solicitudId, requestEvents] of eventsBySolicitud.entries()) {
+      const firstEvent = requestEvents[0];
+      const solicitud = firstEvent.solicitud;
+
+      await sendMonitoringRequiredEmailToAssistantPool({
+        solicitudId,
+        titulo: solicitud.titulo,
+        modalidad: solicitud.modalidadReunion,
+        programaNombre: solicitud.programaNombre,
+        responsableNombre: solicitud.responsableNombre,
+        meetingId: firstEvent.zoomMeetingId || solicitud.meetingPrincipalId,
+        joinUrl: firstEvent.zoomJoinUrl,
+        hostAccount: pickZoomHostAccountLabel(firstEvent.cuentaZoom?.ownerEmail, firstEvent.cuentaZoom?.nombreCuenta),
+        rawPayload: firstEvent.zoomPayloadUltimo ?? undefined,
+        requiresAssistance: true,
+        timezone: firstEvent.timezone || solicitud.timezone || "America/Montevideo",
+        instanceStarts: requestEvents.map((e) => e.inicioProgramadoAt),
+        estadoSolicitud: solicitud.estadoSolicitud
+      });
+
+      await sendMonitoringRequiredInAppToAssistantPool({
+        solicitudId,
+        titulo: solicitud.titulo,
+        modalidad: solicitud.modalidadReunion,
+        programaNombre: solicitud.programaNombre,
+        instanceStarts: requestEvents.map((e) => e.inicioProgramadoAt),
+        timezone: firstEvent.timezone || solicitud.timezone || "America/Montevideo",
+        estadoSolicitud: solicitud.estadoSolicitud
+      });
+
+      renotifiedCount++;
+    }
+
+    await notifyAdminInAppMovement({
+      action: "AGENDA_RENOTIFICADA_MANUALMENTE",
+      actorEmail: admin.email,
+      actorFirstName: admin.firstName,
+      actorLastName: admin.lastName,
+      actorRole: admin.role,
+      summary: `Se renotifico la agenda abierta para ${renotifiedCount} solicitudes.`,
+      details: {
+        solicitudesAfectadas: renotifiedCount,
+        instanciasAfectadas: events.length
+      }
+    });
+
+    return { renotified: renotifiedCount, message: `Se enviaron notificaciones para ${renotifiedCount} solicitudes.` };
+  }
+
 }

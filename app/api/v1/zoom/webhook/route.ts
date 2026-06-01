@@ -1,11 +1,6 @@
 import * as crypto from "node:crypto";
 import { after, NextResponse } from "next/server";
-import {
-  buildBackendSyncConfig,
-  proxyToSyncBackend,
-  type ZoomDriveSyncProxyConnection
-} from "../../zoom-drive-sync/_utils";
-import { asBoolean, env } from "@/src/lib/env";
+import { env } from "@/src/lib/env";
 import { logger } from "@/src/lib/logger";
 import { createAdminZoomRecordingNotifications } from "@/src/modules/notificaciones/service";
 
@@ -34,11 +29,6 @@ const RECORDING_EVENTS = new Set<string>([
   "recording.trashed"
 ]);
 
-const AUTO_SYNC_EVENTS = new Set<string>([
-  "recording.completed",
-  "recording.transcript_completed"
-]);
-
 type ZoomWebhookPayload = {
   event?: unknown;
   event_ts?: unknown;
@@ -46,20 +36,6 @@ type ZoomWebhookPayload = {
     plainToken?: unknown;
     account_id?: unknown;
     object?: unknown;
-  };
-};
-
-type ZoomDriveSyncRunResponse = {
-  ok?: boolean;
-  message?: string;
-  elapsedSeconds?: number;
-  result?: {
-    meetingsSeen?: number;
-    filesDownloaded?: number;
-    filesUploaded?: number;
-    filesSkipped?: number;
-    zoomDeleted?: number;
-    telegramMessagesSent?: number;
   };
 };
 
@@ -163,64 +139,6 @@ function parseEventTimestamp(raw: unknown): number | null {
   return null;
 }
 
-async function triggerZoomDriveAutoSyncFromWebhook(eventName: string, context: {
-  meetingId?: string;
-  meetingUuid?: string;
-  topic?: string;
-  accountId?: string;
-}) {
-  const apiBaseUrl = (env.ZOOM_DRIVE_SYNC_API_BASE_URL ?? "").trim();
-  if (!apiBaseUrl) {
-    logger.warn("Webhook Zoom: ZOOM_DRIVE_SYNC_API_BASE_URL no definido; se omite auto-sync.", {
-      event: eventName,
-      ...context
-    });
-    return;
-  }
-
-  let config: Record<string, unknown>;
-  try {
-    config = buildBackendSyncConfig({});
-  } catch (error) {
-    logger.error("Webhook Zoom: no se pudo construir configuracion para auto-sync.", {
-      event: eventName,
-      ...context,
-      error: error instanceof Error ? error.message : String(error)
-    });
-    return;
-  }
-
-  const connection: ZoomDriveSyncProxyConnection = {
-    apiBaseUrl,
-    apiKey: (env.ZOOM_DRIVE_SYNC_API_KEY ?? "").trim() || undefined
-  };
-
-  const syncResult = await proxyToSyncBackend<ZoomDriveSyncRunResponse>(
-    "/api/v1/zoom-drive-sync/sync",
-    connection,
-    config
-  );
-
-  if (!syncResult.ok) {
-    const failure = syncResult.json as { error?: string };
-    logger.error("Webhook Zoom: auto-sync fallo.", {
-      event: eventName,
-      ...context,
-      status: syncResult.status,
-      error: failure.error ?? "Error desconocido"
-    });
-    return;
-  }
-
-  const result = syncResult.json as ZoomDriveSyncRunResponse;
-  logger.info("Webhook Zoom: auto-sync completado.", {
-    event: eventName,
-    ...context,
-    elapsedSeconds: result.elapsedSeconds,
-    result: result.result
-  });
-}
-
 export async function POST(request: Request) {
   const rawBody = await request.text();
   const body = parseWebhookPayload(rawBody);
@@ -271,35 +189,24 @@ export async function POST(request: Request) {
   if (RECORDING_EVENTS.has(eventName)) {
     const context = extractRecordingContext(body);
     const eventTs = parseEventTimestamp(body.event_ts);
-    const shouldAutoSync =
-      asBoolean(env.ZOOM_DRIVE_AUTO_DOWNLOAD_FROM_WEBHOOK, false) &&
-      AUTO_SYNC_EVENTS.has(eventName);
 
     logger.info("Webhook Zoom: evento de grabacion recibido.", {
       event: eventName,
       eventTs,
-      ...context,
-      autoSyncEnabled: shouldAutoSync
+      ...context
     });
 
     after(async () => {
-      const tasks: Array<Promise<unknown>> = [
+      await Promise.allSettled([
         createAdminZoomRecordingNotifications({
           eventName,
           eventTs,
           accountId: context.accountId,
           meetingId: context.meetingId,
           meetingUuid: context.meetingUuid,
-          topic: context.topic,
-          autoSyncEnabled: shouldAutoSync
+          topic: context.topic
         })
-      ];
-
-      if (shouldAutoSync) {
-        tasks.push(triggerZoomDriveAutoSyncFromWebhook(eventName, context));
-      }
-
-      await Promise.allSettled(tasks);
+      ]);
     });
   } else if (eventName.startsWith("recording.")) {
     logger.warn("Webhook Zoom: evento recording.* no reconocido en whitelist.", {

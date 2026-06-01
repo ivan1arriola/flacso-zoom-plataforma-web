@@ -117,7 +117,6 @@ import { SpaTabGestionAsistentes } from "@/components/spa-tabs/SpaTabGestionAsis
 import { SpaTabCuentas } from "@/components/spa-tabs/SpaTabCuentas";
 import { SpaTabProximasReuniones } from "@/components/spa-tabs/SpaTabProximasReuniones";
 import { SpaTabPasadasReunionesZoom } from "@/components/spa-tabs/SpaTabPasadasReunionesZoom";
-import { SpaTabZoomDriveSync } from "@/components/spa-tabs/SpaTabZoomDriveSync";
 import { SpaTabUsuarios } from "@/components/spa-tabs/SpaTabUsuarios";
 import { SpaTabLogins } from "@/components/spa-tabs/SpaTabLogins";
 import { SpaTabPerfil } from "@/components/spa-tabs/SpaTabPerfil";
@@ -447,7 +446,6 @@ export function SpaHomeScreen() {
   const canSeeManual = canAccessTabForRole("manual", effectiveRole);
   const canSeePastMeetings = canAccessTabForRole("historico", effectiveRole);
   const canSeeZoomAccounts = canAccessTabForRole("cuentas", effectiveRole);
-  const canSeeZoomDriveSync = canAccessTabForRole("zoom_drive_sync", effectiveRole);
   const canSeeUsers = canAccessTabForRole("usuarios", effectiveRole);
   const canSeeLogins = canAccessTabForRole("logins", effectiveRole);
   const canSeeAgendaLibre = canAccessTabForRole("agenda_libre", effectiveRole);
@@ -2829,10 +2827,6 @@ export function SpaHomeScreen() {
           onSelectMonthKey={selectZoomPastMonth}
           onCreatePostMeetingRecord={preloadPastMeetingFormFromZoom}
         />
-      )}
-
-      {tab === "zoom_drive_sync" && canSeeZoomDriveSync && (
-        <SpaTabZoomDriveSync />
       )}
 
       {String(tab) === "estadisticas" && canSeeEstadisticas && (

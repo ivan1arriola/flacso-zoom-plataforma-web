@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 import {
   Alert,
   Box,
+  Button,
   Card,
   CardContent,
   Chip,
@@ -24,12 +25,14 @@ import OpenInNewRoundedIcon from "@mui/icons-material/OpenInNewRounded";
 import SearchRoundedIcon from "@mui/icons-material/SearchRounded";
 import TimelineRoundedIcon from "@mui/icons-material/TimelineRounded";
 import TodayRoundedIcon from "@mui/icons-material/TodayRounded";
+import NotificationsActiveRoundedIcon from "@mui/icons-material/NotificationsActiveRounded";
 import type { Solicitud } from "@/src/services/solicitudesApi";
 import {
   buildAgendaMeetings as buildAdminAgendaMeetings,
   resolveRequestStatus,
   type AgendaMeeting
 } from "@/src/lib/admin-agenda";
+import { renotifyOpenAgenda } from "@/src/services/agendaApi";
 import { MeetingAssistantStatusChip } from "@/components/spa-tabs/MeetingAssistantStatusChip";
 import {
   formatModalidad,
@@ -338,6 +341,20 @@ export function SpaTabAgendaAdmin({ solicitudes }: SpaTabAgendaAdminProps) {
   const [scope, setScope] = useState<AgendaScope>("PROXIMAS");
   const [assistanceFilter, setAssistanceFilter] = useState<AgendaAssistanceFilter>("TODAS");
   const [search, setSearch] = useState("");
+  const [isRenotifying, setIsRenotifying] = useState(false);
+  const [renotifyMessage, setRenotifyMessage] = useState("");
+
+  const handleRenotify = async () => {
+    setIsRenotifying(true);
+    setRenotifyMessage("");
+    const res = await renotifyOpenAgenda();
+    setIsRenotifying(false);
+    if (res.success) {
+      setRenotifyMessage(res.result?.message || "Notificaciones enviadas.");
+    } else {
+      setRenotifyMessage(res.error || "Error al renotificar.");
+    }
+  };
 
   const agendaMeetings = useMemo(() => buildAdminAgendaMeetings(solicitudes), [solicitudes]);
   const visibleByScope = useMemo(
@@ -390,14 +407,33 @@ export function SpaTabAgendaAdmin({ solicitudes }: SpaTabAgendaAdminProps) {
     <Card variant="outlined" sx={{ borderRadius: 3 }}>
       <CardContent>
         <Stack spacing={2.5}>
-          <Box>
-            <Typography variant="h5" sx={{ fontWeight: 800 }}>
-              Agenda general
-            </Typography>
-            <Typography variant="body2" color="text.secondary">
-              Vista administrativa de las instancias de reunión ya programadas en el sistema.
-            </Typography>
-          </Box>
+          <Stack direction={{ xs: "column", sm: "row" }} justifyContent="space-between" alignItems="flex-start" spacing={2}>
+            <Box>
+              <Typography variant="h5" sx={{ fontWeight: 800 }}>
+                Agenda general
+              </Typography>
+              <Typography variant="body2" color="text.secondary">
+                Vista administrativa de las instancias de reunión ya programadas en el sistema.
+              </Typography>
+            </Box>
+            <Button
+              variant="outlined"
+              color="primary"
+              size="small"
+              startIcon={<NotificationsActiveRoundedIcon />}
+              onClick={handleRenotify}
+              disabled={isRenotifying}
+              sx={{ flexShrink: 0 }}
+            >
+              Renotificar Agenda Abierta
+            </Button>
+          </Stack>
+
+          {renotifyMessage ? (
+            <Alert severity={renotifyMessage.includes("Error") ? "error" : "success"} onClose={() => setRenotifyMessage("")}>
+              {renotifyMessage}
+            </Alert>
+          ) : null}
 
           {unscheduledRequests > 0 ? (
             <Alert severity="info" sx={{ borderRadius: 2 }}>

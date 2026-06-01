@@ -2,7 +2,7 @@
 
 App web principal para gestion institucional de solicitudes Zoom, cobertura de asistencia, asignaciones y base economica.
 
-Este proyecto representa la capa web pensada para Vercel. La sincronizacion pesada con Zoom/Drive y la futura API externa viven por separado en `../flacso-zoom-sync-backend`.
+Este proyecto representa la capa web pensada para Vercel. La sincronizacion de grabaciones Zoom/Drive vive por separado en `../flacso-zoom-drive-desktop`.
 
 ## Estado actual
 
@@ -79,10 +79,8 @@ npm run dev
 - URL completa en producción: `${APP_BASE_URL}/api/v1/zoom/webhook`
 - Variables requeridas para validar firma/challenge:
   - `ZOOM_WEBHOOK_SECRET_TOKEN`
-- Variables opcionales para auto-sincronizar a Drive al llegar eventos de grabación:
-  - `ZOOM_DRIVE_AUTO_DOWNLOAD_FROM_WEBHOOK=true`
-  - `ZOOM_DRIVE_SYNC_API_BASE_URL`
-  - `ZOOM_DRIVE_SYNC_API_KEY` (si tu backend la exige)
+
+La web ya no ejecuta ni proxya la sincronizacion de grabaciones. Los eventos `recording.*` quedan disponibles para validacion del webhook y notificaciones internas.
 
 Eventos `recording.*` implementados:
 - `recording.archive_files_completed`

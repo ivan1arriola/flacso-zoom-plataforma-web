@@ -75,8 +75,7 @@ function getEmailBaseUrl(): string {
 
 function buildBrandedEmailLayout(input: BrandedEmailLayoutInput): string {
   const baseUrl = getEmailBaseUrl();
-  const brandingBaseUrl = `${baseUrl.replace(/\/$/, "")}/branding`;
-  const secondaryWhiteLogoUrl = `${brandingBaseUrl}/flacso-uruguay-secondary-white.png`;
+  const logoUrl = `${baseUrl.replace(/\/$/, "")}/flacso-logo.png`;
   const preheader = escapeHtml(input.preheader);
   const title = escapeHtml(input.title);
   const kicker = escapeHtml(input.kicker ?? "Plataforma Zoom de FLACSO Uruguay");
@@ -126,10 +125,10 @@ function buildBrandedEmailLayout(input: BrandedEmailLayoutInput): string {
         <td align="center">
           <table role="presentation" width="640" cellspacing="0" cellpadding="0" style="max-width:640px;width:100%;border-collapse:collapse;">
             <tr>
-              <td style="border-radius:14px 14px 0 0;padding:20px 24px;background:linear-gradient(135deg,#1d3a72,#254c95);">
-                <img src="${escapeHtml(secondaryWhiteLogoUrl)}" alt="FLACSO Uruguay" style="height:42px;display:block;" />
-                <p style="margin:18px 0 6px 0;color:#cfd8ea;font-size:12px;letter-spacing:0.08em;text-transform:uppercase;font-weight:700;">${kicker}</p>
-                <h1 style="margin:0;color:#ffffff;font-size:28px;line-height:1.2;font-weight:800;">${title}</h1>
+              <td style="border-radius:14px 14px 0 0;padding:20px 24px;background:#ffffff;border:1px solid #dbe3f0;border-bottom:0;">
+                <img src="${escapeHtml(logoUrl)}" alt="FLACSO Uruguay" style="height:44px;display:block;" />
+                <p style="margin:18px 0 6px 0;color:#536074;font-size:12px;letter-spacing:0.08em;text-transform:uppercase;font-weight:700;">${kicker}</p>
+                <h1 style="margin:0;color:#1d3a72;font-size:28px;line-height:1.2;font-weight:800;">${title}</h1>
               </td>
             </tr>
             <tr>
@@ -142,14 +141,11 @@ function buildBrandedEmailLayout(input: BrandedEmailLayoutInput): string {
               </td>
             </tr>
             <tr>
-              <td style="background:linear-gradient(135deg,#1d3a72,#254c95);padding:16px 24px;border:1px solid #1d3a72;border-top:0;border-radius:0 0 14px 14px;">
+              <td style="background:#f8fbff;padding:16px 24px;border:1px solid #dbe3f0;border-top:0;border-radius:0 0 14px 14px;">
                 <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse:collapse;">
                   <tr>
                     <td style="vertical-align:middle;">
-                      <p style="margin:0;color:#dbe8ff;font-size:12px;line-height:1.5;">${footerLine}</p>
-                    </td>
-                    <td align="right" style="padding-left:12px;vertical-align:middle;">
-                      <img src="${escapeHtml(secondaryWhiteLogoUrl)}" alt="FLACSO Uruguay" style="height:24px;display:block;" />
+                      <p style="margin:0;color:#5b6576;font-size:12px;line-height:1.5;">${footerLine}</p>
                     </td>
                   </tr>
                 </table>
@@ -192,15 +188,27 @@ function buildMeetingDetailsEmailHtml(input: {
       ? "No aplica"
       : resolvedAssistant || "Pendiente de asignacion";
 
+  const hasMeetingData = (input.meetingId && input.meetingId.trim()) || (input.joinUrl && input.joinUrl.trim());
+  
+  let rows = '';
+  if (hasMeetingData) {
+    rows += `<p style="margin:0 0 6px;color:#223042;"><strong>ID de reunion:</strong> ${meetingIdLabel}</p>`;
+    rows += `<p style="margin:0 0 6px;color:#223042;"><strong>Link de acceso:</strong> ${joinUrlHtml}</p>`;
+    if (input.hostAccount?.trim()) {
+      rows += `<p style="margin:0 0 6px;color:#223042;"><strong>Cuenta Zoom:</strong> ${hostAccountLabel}</p>`;
+    }
+  } else {
+    rows += `<p style="margin:0 0 6px;color:#5b6576;font-style:italic;">Los datos de conexion de Zoom aun no estan disponibles.</p>`;
+  }
+
+  rows += `<hr style="border:0;border-top:1px solid #e2e8f0;margin:12px 0;" />`;
+  rows += `<p style="margin:0 0 6px;color:#223042;"><strong>Requiere asistencia:</strong> ${escapeHtml(requiresAssistanceLabel)}</p>`;
+  rows += `<p style="margin:0;color:#223042;"><strong>Asignado a:</strong> ${escapeHtml(assistantLabel)}</p>`;
+
   return `
-    <div style="border:1px solid #dbe5f3;border-radius:12px;padding:14px;background:#ffffff;margin:0 0 14px;">
-      <p style="margin:0 0 8px;font-weight:700;color:#0b2c5e;">Detalles de la reunion</p>
-      <p style="margin:0 0 6px;color:#223042;"><strong>ID de reunion:</strong> ${meetingIdLabel}</p>
-      <p style="margin:0 0 6px;color:#223042;"><strong>Link completo:</strong> ${joinUrlHtml}</p>
-      <p style="margin:0 0 6px;color:#223042;"><strong>Cuenta:</strong> ${hostAccountLabel}</p>
-      <p style="margin:0 0 6px;color:#223042;"><strong>Contrasena de la cuenta:</strong> ${passwordLabel}</p>
-      <p style="margin:0 0 6px;color:#223042;"><strong>Requiere asistencia:</strong> ${escapeHtml(requiresAssistanceLabel)}</p>
-      <p style="margin:0;color:#223042;"><strong>Quien va a asistir:</strong> ${escapeHtml(assistantLabel)}</p>
+    <div style="border:1px solid #dbe5f3;border-radius:12px;padding:16px;background:#ffffff;margin:0 0 16px;">
+      <p style="margin:0 0 12px;font-size:15px;font-weight:700;color:#1d3a72;">Detalles operativos</p>
+      ${rows}
     </div>
   `;
 }

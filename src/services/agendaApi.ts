@@ -212,3 +212,17 @@ export async function reportMeetingDuration(
   }
   return { success: true };
 }
+
+export async function renotifyOpenAgenda(): Promise<{ success: boolean; error?: string; result?: { renotified: number; message: string } }> {
+  const response = await fetch("/api/v1/agenda-soporte/renotificar", {
+    method: "POST"
+  });
+  const data = (await response.json()) as { error?: string; renotified?: number; message?: string };
+  if (!response.ok) {
+    return {
+      success: false,
+      error: data.error ?? "No se pudo renotificar la agenda."
+    };
+  }
+  return { success: true, result: { renotified: data.renotified ?? 0, message: data.message ?? "" } };
+}
