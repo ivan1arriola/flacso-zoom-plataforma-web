@@ -111,7 +111,7 @@ const SEMANTIC_METRIC_COLORS = {
   error: "#D32F2F"
 } as const;
 const MONTHLY_ACCOUNTING_DRIVE_FOLDER_URL =
-  "https://drive.google.com/drive/folders/1vlHPih1o6umZ5C5SVDZsx6b8uLi13Qs7?usp=sharing";
+  "https://drive.google.com/drive/folders/1cclS5bIINgXsrOtwbL1uo5tbvkAlf9jz?usp=drive_link";
 
 function resolveMetricSemanticColor(metric: MetricCardItem, value: number): keyof typeof SEMANTIC_METRIC_COLORS {
   if (value === 0 && (metric.semanticColor === "warning" || metric.semanticColor === "error")) {
@@ -189,6 +189,34 @@ function formatDateTime24(value: string): string {
     timeStyle: "short",
     hour12: false
   });
+}
+
+type MonthlyAccountingAssistantGroup = {
+  assistant: MonthlyAccountingPreview["assistants"][number];
+  rows: MonthlyAccountingPreview["rows"];
+};
+
+function formatAccountingModalidad(value: string): string {
+  if (value === "VIRTUAL") return "Virtual";
+  if (value === "HIBRIDA") return "Hibrida";
+  return value;
+}
+
+function groupMonthlyAccountingPreview(preview: MonthlyAccountingPreview): MonthlyAccountingAssistantGroup[] {
+  const rowsByAssistant = new Map<string, MonthlyAccountingPreview["rows"]>();
+  for (const row of preview.rows) {
+    const existing = rowsByAssistant.get(row.assistantId);
+    if (existing) {
+      existing.push(row);
+    } else {
+      rowsByAssistant.set(row.assistantId, [row]);
+    }
+  }
+
+  return preview.assistants.map((assistant) => ({
+    assistant,
+    rows: rowsByAssistant.get(assistant.assistantId) ?? []
+  }));
 }
 
 type InterestState = "ME_INTERESA" | "NO_ME_INTERESA" | "RETIRADO" | "SIN_RESPUESTA";
@@ -1313,6 +1341,8 @@ export function SpaTabDashboard({
                   );
                 }
 
+                const assistantGroups = groupMonthlyAccountingPreview(previewItem);
+
                 return (
                   <Card key={previewItem.monthKey} variant="outlined" sx={{ borderRadius: 2 }}>
                     <CardContent sx={{ p: 1.2 }}>
@@ -1339,64 +1369,126 @@ export function SpaTabDashboard({
                         {formatMoney(previewItem.rates.HIBRIDA.valorHora, previewItem.rates.HIBRIDA.moneda)}
                       </Typography>
 
-                      <Box sx={{ mt: 1, overflowX: "auto" }}>
-                        <Box
-                          component="table"
-                          sx={{
-                            width: "100%",
-                            borderCollapse: "collapse",
-                            fontSize: 12
-                          }}
-                        >
-                          <Box component="thead">
-                            <Box component="tr">
-                              {["Asistente", "Programa", "Encuentro", "Inicio", "Modalidad", "Horas", "Importe"].map((label) => (
+                      <Stack spacing={1.2} sx={{ mt: 1.2 }}>
+                        {assistantGroups.map(({ assistant, rows }) => (
+                          <Card
+                            key={`${previewItem.monthKey}-${assistant.assistantId}`}
+                            variant="outlined"
+                            sx={{
+                              borderRadius: 2,
+                              background: alpha(theme.palette.primary.main, 0.03)
+                            }}
+                          >
+                            <CardContent sx={{ p: 1.2 }}>
+                              <Stack
+                                direction={{ xs: "column", md: "row" }}
+                                spacing={1}
+                                alignItems={{ xs: "flex-start", md: "center" }}
+                                justifyContent="space-between"
+                                sx={{ mb: 1 }}
+                              >
+                                <Box>
+                                  <Typography variant="subtitle1" sx={{ fontWeight: 800 }}>
+                                    {assistant.assistantName}
+                                  </Typography>
+                                  <Typography variant="body2" color="text.secondary">
+                                    {assistant.assistantEmail || "Sin email"}
+                                  </Typography>
+                                </Box>
+                                <Typography variant="body2" sx={{ fontWeight: 700 }}>
+                                  Total: {formatMoney(assistant.montoTotal, previewItem.totals.currency)}
+                                </Typography>
+                              </Stack>
+
+                              <Stack direction="row" spacing={0.8} useFlexGap flexWrap="wrap" sx={{ mb: 1 }}>
+                                <Chip size="small" variant="outlined" label={`${rows.length} encuentros`} />
+                                <Chip size="small" variant="outlined" label={`Virtual ${formatHours(assistant.horasVirtuales)}`} />
+                                <Chip size="small" variant="outlined" label={`Hibrida ${formatHours(assistant.horasHibridas)}`} />
+                                <Chip size="small" variant="outlined" label={`Total ${formatHours(assistant.horasTotales)}`} />
+                              </Stack>
+
+                              <Box sx={{ overflowX: "auto" }}>
                                 <Box
-                                  key={label}
-                                  component="th"
+                                  component="table"
                                   sx={{
-                                    textAlign: "left",
-                                    py: 0.7,
-                                    px: 0.8,
-                                    borderBottom: "1px solid",
-                                    borderColor: "divider",
-                                    whiteSpace: "nowrap"
+                                    width: "100%",
+                                    borderCollapse: "collapse",
+                                    fontSize: 12
                                   }}
                                 >
-                                  {label}
-                                </Box>
-                              ))}
-                            </Box>
-                          </Box>
-                          <Box component="tbody">
-                            {previewItem.rows.map((row, index) => (
-                              <Box component="tr" key={`${previewItem.monthKey}-${row.assistantId}-${index}`}>
-                                <Box component="td" sx={{ py: 0.7, px: 0.8, borderBottom: "1px solid", borderColor: "divider" }}>
-                                  {row.assistantName}
-                                </Box>
-                                <Box component="td" sx={{ py: 0.7, px: 0.8, borderBottom: "1px solid", borderColor: "divider" }}>
-                                  {row.programaNombre}
-                                </Box>
-                                <Box component="td" sx={{ py: 0.7, px: 0.8, borderBottom: "1px solid", borderColor: "divider" }}>
-                                  {row.titulo}
-                                </Box>
-                                <Box component="td" sx={{ py: 0.7, px: 0.8, borderBottom: "1px solid", borderColor: "divider", whiteSpace: "nowrap" }}>
-                                  {row.inicio}
-                                </Box>
-                                <Box component="td" sx={{ py: 0.7, px: 0.8, borderBottom: "1px solid", borderColor: "divider" }}>
-                                  {row.modalidad}
-                                </Box>
-                                <Box component="td" sx={{ py: 0.7, px: 0.8, borderBottom: "1px solid", borderColor: "divider", whiteSpace: "nowrap" }}>
-                                  {formatHours(row.horas)}
-                                </Box>
-                                <Box component="td" sx={{ py: 0.7, px: 0.8, borderBottom: "1px solid", borderColor: "divider", whiteSpace: "nowrap" }}>
-                                  {formatMoney(row.importe, row.moneda)}
+                                  <Box component="thead">
+                                    <Box component="tr">
+                                      {["Programa", "Encuentro", "Inicio", "Modalidad", "Horas", "Tarifa", "Importe"].map((label) => (
+                                        <Box
+                                          key={label}
+                                          component="th"
+                                          sx={{
+                                            textAlign: "left",
+                                            py: 0.7,
+                                            px: 0.8,
+                                            borderBottom: "1px solid",
+                                            borderColor: "divider",
+                                            whiteSpace: "nowrap"
+                                          }}
+                                        >
+                                          {label}
+                                        </Box>
+                                      ))}
+                                    </Box>
+                                  </Box>
+                                  <Box component="tbody">
+                                    {rows.map((row, index) => (
+                                      <Box component="tr" key={`${previewItem.monthKey}-${assistant.assistantId}-${index}`}>
+                                        <Box component="td" sx={{ py: 0.7, px: 0.8, borderBottom: "1px solid", borderColor: "divider" }}>
+                                          {row.programaNombre}
+                                        </Box>
+                                        <Box component="td" sx={{ py: 0.7, px: 0.8, borderBottom: "1px solid", borderColor: "divider" }}>
+                                          {row.titulo}
+                                        </Box>
+                                        <Box component="td" sx={{ py: 0.7, px: 0.8, borderBottom: "1px solid", borderColor: "divider", whiteSpace: "nowrap" }}>
+                                          {formatDateTime24(row.inicio)}
+                                        </Box>
+                                        <Box component="td" sx={{ py: 0.7, px: 0.8, borderBottom: "1px solid", borderColor: "divider" }}>
+                                          {formatAccountingModalidad(row.modalidad)}
+                                        </Box>
+                                        <Box component="td" sx={{ py: 0.7, px: 0.8, borderBottom: "1px solid", borderColor: "divider", whiteSpace: "nowrap" }}>
+                                          {formatHours(row.horas)}
+                                        </Box>
+                                        <Box component="td" sx={{ py: 0.7, px: 0.8, borderBottom: "1px solid", borderColor: "divider", whiteSpace: "nowrap" }}>
+                                          {formatMoney(row.tarifaHora, row.moneda)}
+                                        </Box>
+                                        <Box component="td" sx={{ py: 0.7, px: 0.8, borderBottom: "1px solid", borderColor: "divider", whiteSpace: "nowrap" }}>
+                                          {formatMoney(row.importe, row.moneda)}
+                                        </Box>
+                                      </Box>
+                                    ))}
+                                  </Box>
                                 </Box>
                               </Box>
-                            ))}
-                          </Box>
-                        </Box>
-                      </Box>
+
+                              <Box
+                                sx={{
+                                  mt: 1,
+                                  p: 1,
+                                  borderRadius: 2,
+                                  background: alpha(theme.palette.success.main, 0.08),
+                                  border: "1px solid",
+                                  borderColor: alpha(theme.palette.success.main, 0.18)
+                                }}
+                              >
+                                <Typography variant="caption" color="text.secondary" sx={{ display: "block", mb: 0.8 }}>
+                                  Resumen del asistente
+                                </Typography>
+                                <Stack direction="row" spacing={0.8} useFlexGap flexWrap="wrap">
+                                  <Chip size="small" color="success" variant="outlined" label={`Virtual: ${formatHours(assistant.horasVirtuales)} · ${formatMoney(assistant.montoVirtual, previewItem.rates.VIRTUAL.moneda)}`} />
+                                  <Chip size="small" color="success" variant="outlined" label={`Hibrida: ${formatHours(assistant.horasHibridas)} · ${formatMoney(assistant.montoHibrida, previewItem.rates.HIBRIDA.moneda)}`} />
+                                  <Chip size="small" color="success" label={`Total: ${formatHours(assistant.horasTotales)} · ${formatMoney(assistant.montoTotal, previewItem.totals.currency)}`} />
+                                </Stack>
+                              </Box>
+                            </CardContent>
+                          </Card>
+                        ))}
+                      </Stack>
                     </CardContent>
                   </Card>
                 );

@@ -9,6 +9,12 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock("@/src/lib/db", () => ({
   db: {
+    user: {
+      findMany: vi.fn().mockResolvedValue([]),
+    },
+    notificacion: {
+      createMany: vi.fn().mockResolvedValue({ count: 0 }),
+    },
     eventoZoom: {
       findUnique: mocks.dbEventoZoomFindUnique,
       update: vi.fn().mockResolvedValue({}),
@@ -108,6 +114,7 @@ describe("SalasLegacyService.updateUpcomingEvent - specific occurrence update", 
     const userMock = {
       id: "user-admin",
       email: "admin@flacso.edu.uy",
+      emails: ["admin@flacso.edu.uy"],
       name: "Admin",
       role: UserRole.ADMINISTRADOR,
     };

@@ -11128,14 +11128,18 @@ export class SalasLegacyService {
     const virtualRate = rates.find((rate) => rate.modalidadReunion === ModalidadReunion.VIRTUAL) ?? null;
     const hibridaRate = rates.find((rate) => rate.modalidadReunion === ModalidadReunion.HIBRIDA) ?? null;
 
+    const reportCurrencyFallback =
+      (virtualRate?.moneda ?? "").trim() ||
+      (hibridaRate?.moneda ?? "").trim() ||
+      "$";
     const ratesByModalidad: Record<ModalidadReunion, { valorHora: number; moneda: string }> = {
       [ModalidadReunion.VIRTUAL]: {
-        valorHora: Number(virtualRate?.valorHora ?? 0),
-        moneda: virtualRate?.moneda ?? ""
+        valorHora: 400,
+        moneda: (virtualRate?.moneda ?? reportCurrencyFallback).trim() || reportCurrencyFallback
       },
       [ModalidadReunion.HIBRIDA]: {
-        valorHora: Number(hibridaRate?.valorHora ?? 0),
-        moneda: hibridaRate?.moneda ?? ""
+        valorHora: 500,
+        moneda: (hibridaRate?.moneda ?? reportCurrencyFallback).trim() || reportCurrencyFallback
       }
     };
     const now = new Date();
@@ -11429,30 +11433,6 @@ export class SalasLegacyService {
         monedaTotalMes: totalCurrency
       };
     });
-    const reportRows = previewRows.map((detail) => {
-      return {
-        Mes: detail.monthKey,
-        Asistente: detail.assistantName,
-        Email: detail.assistantEmail,
-        Programa: detail.programaNombre,
-        Encuentro: detail.titulo,
-        Inicio: detail.inicio,
-        Fin: detail.fin,
-        Modalidad: detail.modalidad,
-        "Duracion (min)": detail.minutos,
-        "Duracion (h)": detail.horas,
-        "Tarifa hora": detail.tarifaHora,
-        Moneda: detail.moneda,
-        Importe: detail.importe,
-        "Horas virtuales asistente (mes)": detail.horasVirtualesAsistenteMes,
-        "Horas hibridas asistente (mes)": detail.horasHibridasAsistenteMes,
-        "Horas totales asistente (mes)": detail.horasTotalesAsistenteMes,
-        "Monto total asistente (mes)": detail.montoTotalAsistenteMes,
-        "Horas totales mes": detail.horasTotalesMes,
-        "Monto total mes": detail.montoTotalMes,
-        "Moneda total mes": detail.monedaTotalMes
-      };
-    });
     const assistantPreview = assistantSummaries.map((assistant) => {
       return {
         assistantId: assistant.assistantId,
@@ -11495,8 +11475,111 @@ export class SalasLegacyService {
       rows: previewRows
     };
 
+    const previewRowsByAssistant = new Map<string, typeof previewRows>();
+    for (const row of previewRows) {
+      const existing = previewRowsByAssistant.get(row.assistantId);
+      if (existing) {
+        existing.push(row);
+      } else {
+        previewRowsByAssistant.set(row.assistantId, [row]);
+      }
+    }
+
+    const formatModalidadLabel = (modalidad: ModalidadReunion) =>
+      modalidad === ModalidadReunion.VIRTUAL ? "Virtual" : "Hibrida";
+
+    const workbookRows: Array<Array<string | number>> = [
+      ["Informe de contaduria", `Mes ${monthKey}`],
+      [
+        "Tarifas aplicadas",
+        `Virtual ${ratesByModalidad.VIRTUAL.moneda} ${formatNumber(ratesByModalidad.VIRTUAL.valorHora)}`,
+        `Hibrida ${ratesByModalidad.HIBRIDA.moneda} ${formatNumber(ratesByModalidad.HIBRIDA.valorHora)}`
+      ],
+      []
+    ];
+
+    for (const assistant of assistantPreview) {
+      const assistantRows = previewRowsByAssistant.get(assistant.assistantId) ?? [];
+      workbookRows.push(["Asistente", assistant.assistantName, assistant.assistantEmail]);
+      workbookRows.push([
+        "Programa",
+        "Encuentro",
+        "Inicio",
+        "Fin",
+        "Modalidad",
+        "Duracion (h)",
+        "Tarifa hora",
+        "Moneda",
+        "Importe"
+      ]);
+
+      for (const row of assistantRows) {
+        workbookRows.push([
+          row.programaNombre,
+          row.titulo,
+          row.inicio,
+          row.fin,
+          formatModalidadLabel(row.modalidad as ModalidadReunion),
+          row.horas,
+          row.tarifaHora,
+          row.moneda,
+          row.importe
+        ]);
+      }
+
+      workbookRows.push([
+        "Resumen",
+        "",
+        "",
+        "",
+        "Virtual",
+        assistant.horasVirtuales,
+        formatNumber(ratesByModalidad.VIRTUAL.valorHora),
+        ratesByModalidad.VIRTUAL.moneda,
+        assistant.montoVirtual
+      ]);
+      workbookRows.push([
+        "",
+        "",
+        "",
+        "",
+        "Hibrida",
+        assistant.horasHibridas,
+        formatNumber(ratesByModalidad.HIBRIDA.valorHora),
+        ratesByModalidad.HIBRIDA.moneda,
+        assistant.montoHibrida
+      ]);
+      workbookRows.push([
+        "",
+        "",
+        "",
+        "",
+        "Total",
+        assistant.horasTotales,
+        "",
+        totalCurrency,
+        assistant.montoTotal
+      ]);
+      workbookRows.push([]);
+    }
+
+    workbookRows.push(["Resumen general", "", "", "", "Virtual", formatNumber(totalMinutes / 60), "", ratesByModalidad.VIRTUAL.moneda, formatNumber(amountByModalidad.VIRTUAL)]);
+    workbookRows.push(["", "", "", "", "Hibrida", formatNumber(minutesByModalidad.HIBRIDA / 60), "", ratesByModalidad.HIBRIDA.moneda, formatNumber(amountByModalidad.HIBRIDA)]);
+    workbookRows.push(["", "", "", "", "Total", formatNumber(totalHours), "", totalCurrency, formatNumber(totalAmount)]);
+
     const workbook = XLSX.utils.book_new();
-    const unifiedSheet = XLSX.utils.json_to_sheet(reportRows);
+    const unifiedSheet = XLSX.utils.aoa_to_sheet(workbookRows);
+    unifiedSheet["!cols"] = [
+      { wch: 24 },
+      { wch: 36 },
+      { wch: 18 },
+      { wch: 18 },
+      { wch: 14 },
+      { wch: 14 },
+      { wch: 14 },
+      { wch: 12 },
+      { wch: 14 }
+    ];
     XLSX.utils.book_append_sheet(workbook, unifiedSheet, "Informe");
 
     const content = XLSX.write(workbook, { type: "buffer", bookType: "xlsx" }) as Buffer;
@@ -11515,7 +11598,7 @@ export class SalasLegacyService {
     driveFolderId?: string | null;
   }) {
     const report = await this.buildMonthlyAccountingWorkbook({ monthKey: input.monthKey });
-    const defaultFolderId = "1vlHPih1o6umZ5C5SVDZsx6b8uLi13Qs7";
+    const defaultFolderId = "1cclS5bIINgXsrOtwbL1uo5tbvkAlf9jz";
     const driveFolderId = (
       input.driveFolderId ??
       env.MONTHLY_ACCOUNTING_DRIVE_FOLDER_ID ??
