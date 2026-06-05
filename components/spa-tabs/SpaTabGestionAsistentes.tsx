@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import {
+  Alert,
   Box,
   Card,
   CardContent,
@@ -33,11 +34,12 @@ import ArrowForwardIcon from "@mui/icons-material/ArrowForward";
 import AssignmentIndIcon from "@mui/icons-material/AssignmentInd";
 import BarChartIcon from "@mui/icons-material/BarChart";
 import GroupIcon from "@mui/icons-material/Group";
-import CloudDownloadIcon from "@mui/icons-material/CloudDownload";
+import CloudUploadIcon from "@mui/icons-material/CloudUpload";
 import ArrowBackIcon from "@mui/icons-material/ArrowBack";
 
 import { 
-  loadPersonHours, 
+  loadPersonHours,
+  uploadMonthlyAccountingReportToDrive,
   type PersonHoursMeeting, 
   type PersonHoursPerson, 
   type PersonHoursResponse 
@@ -75,8 +77,6 @@ interface SpaTabGestionAsistentesProps {
   onSuggestMonthly: () => void;
   onSuggestNext: () => void;
   onUnassignAssistant?: (eventoId: string) => void;
-  // Other
-  onDownloadReport: () => void;
 }
 
 export function SpaTabGestionAsistentes(props: SpaTabGestionAsistentesProps) {
@@ -88,6 +88,10 @@ export function SpaTabGestionAsistentes(props: SpaTabGestionAsistentesProps) {
   const [detail, setDetail] = useState<PersonHoursResponse | null>(null);
   const [isLoadingList, setIsLoadingList] = useState(true);
   const [isLoadingDetail, setIsLoadingDetail] = useState(false);
+  const [isUploadingReport, setIsUploadingReport] = useState(false);
+  const [reportUploadError, setReportUploadError] = useState("");
+  const [reportUploadSuccess, setReportUploadSuccess] = useState("");
+  const [reportUploadLink, setReportUploadLink] = useState<string | null>(null);
 
   // Stats calculation
   const totalMonthlyExecuted = useMemo(() => {
@@ -268,14 +272,59 @@ export function SpaTabGestionAsistentes(props: SpaTabGestionAsistentesProps) {
                   )}
                 </List>
                 <Box sx={{ p: 2, bgcolor: "grey.50" }}>
+                  {reportUploadError ? (
+                    <Alert severity="error" sx={{ mb: 1.5, borderRadius: 2 }}>
+                      {reportUploadError}
+                    </Alert>
+                  ) : null}
+                  {reportUploadSuccess ? (
+                    <Alert
+                      severity="success"
+                      sx={{ mb: 1.5, borderRadius: 2 }}
+                      action={
+                        reportUploadLink ? (
+                          <Button
+                            color="inherit"
+                            size="small"
+                            href={reportUploadLink}
+                            target="_blank"
+                            rel="noreferrer"
+                          >
+                            Abrir
+                          </Button>
+                        ) : undefined
+                      }
+                    >
+                      {reportUploadSuccess}
+                    </Alert>
+                  ) : null}
                   <Button 
                     fullWidth 
-                    variant="outlined" 
-                    startIcon={<CloudDownloadIcon />}
-                    onClick={props.onDownloadReport}
+                    variant="contained"
+                    color="success"
+                    startIcon={<CloudUploadIcon />}
+                    disabled={isUploadingReport}
+                    onClick={async () => {
+                      setReportUploadError("");
+                      setReportUploadSuccess("");
+                      setReportUploadLink(null);
+                      setIsUploadingReport(true);
+                      const result = await uploadMonthlyAccountingReportToDrive();
+                      if (!result.success) {
+                        setReportUploadError(
+                          result.error ?? "No se pudo subir el informe de contaduria a Drive."
+                        );
+                      } else {
+                        setReportUploadSuccess(
+                          `Informe ${result.fileName ?? ""} subido correctamente a Drive.`
+                        );
+                        setReportUploadLink(result.driveWebViewLink ?? null);
+                      }
+                      setIsUploadingReport(false);
+                    }}
                     sx={{ borderRadius: 2 }}
                   >
-                    Informe de Contaduría
+                    {isUploadingReport ? "Subiendo informe..." : "Subir informe a Drive"}
                   </Button>
                 </Box>
               </Paper>

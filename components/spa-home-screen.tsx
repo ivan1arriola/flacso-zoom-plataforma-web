@@ -75,8 +75,7 @@ import {
 } from "@/src/services/userApi";
 import {
   loadTarifas,
-  submitTarifaUpdate as submitTarifaUpdateApi,
-  downloadMonthlyAccountingReport
+  submitTarifaUpdate as submitTarifaUpdateApi
 } from "@/src/services/tarifasApi";
 import {
   loadZoomAccounts,
@@ -2753,12 +2752,6 @@ export function SpaHomeScreen() {
           onSuggestMonthly={suggestMonthlyAssignment}
           onSuggestNext={suggestNextMonthlyAssignment}
           onUnassignAssistant={onUnassignAssistantFromEvent}
-          onDownloadReport={async () => {
-            const result = await downloadMonthlyAccountingReport();
-            if (!result.success && result.error) {
-              setMessage(result.error);
-            }
-          }}
         />
       )}
 

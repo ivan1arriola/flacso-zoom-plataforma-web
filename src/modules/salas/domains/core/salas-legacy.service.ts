@@ -22,7 +22,7 @@ import * as XLSX from "xlsx";
 import { db } from "@/src/lib/db";
 import { env } from "@/src/lib/env";
 import { EmailClient } from "@/src/lib/email.client";
-import { uploadFileToDriveFolder } from "@/src/lib/google-drive.client";
+import { createSpreadsheetInDriveFolder } from "@/src/lib/google-drive.client";
 import { logger } from "@/src/lib/logger";
 import {
   buildMotivoAsistenciaWithWaitingRoom,
@@ -11489,18 +11489,30 @@ export class SalasLegacyService {
       modalidad === ModalidadReunion.VIRTUAL ? "Virtual" : "Hibrida";
 
     const workbookRows: Array<Array<string | number>> = [
-      ["Informe de contaduria", `Mes ${monthKey}`],
+      ["Informe de contaduria", "", "", "", `Mes ${monthKey}`],
       [
         "Tarifas aplicadas",
         `Virtual ${ratesByModalidad.VIRTUAL.moneda} ${formatNumber(ratesByModalidad.VIRTUAL.valorHora)}`,
+        "",
+        "",
         `Hibrida ${ratesByModalidad.HIBRIDA.moneda} ${formatNumber(ratesByModalidad.HIBRIDA.valorHora)}`
       ],
       []
     ];
+    const assistantSections: Array<{
+      assistantHeaderRowIndex: number;
+      tableHeaderRowIndex: number;
+      detailStartRowIndex: number;
+      detailEndRowIndex: number;
+      summaryStartRowIndex: number;
+      summaryEndRowIndex: number;
+    }> = [];
 
     for (const assistant of assistantPreview) {
       const assistantRows = previewRowsByAssistant.get(assistant.assistantId) ?? [];
+      const assistantHeaderRowIndex = workbookRows.length;
       workbookRows.push(["Asistente", assistant.assistantName, assistant.assistantEmail]);
+      const tableHeaderRowIndex = workbookRows.length;
       workbookRows.push([
         "Programa",
         "Encuentro",
@@ -11513,6 +11525,7 @@ export class SalasLegacyService {
         "Importe"
       ]);
 
+      const detailStartRowIndex = workbookRows.length;
       for (const row of assistantRows) {
         workbookRows.push([
           row.programaNombre,
@@ -11527,6 +11540,8 @@ export class SalasLegacyService {
         ]);
       }
 
+      const detailEndRowIndex = workbookRows.length - 1;
+      const summaryStartRowIndex = workbookRows.length;
       workbookRows.push([
         "Resumen",
         "",
@@ -11560,12 +11575,23 @@ export class SalasLegacyService {
         totalCurrency,
         assistant.montoTotal
       ]);
+      const summaryEndRowIndex = workbookRows.length - 1;
+      assistantSections.push({
+        assistantHeaderRowIndex,
+        tableHeaderRowIndex,
+        detailStartRowIndex,
+        detailEndRowIndex,
+        summaryStartRowIndex,
+        summaryEndRowIndex
+      });
       workbookRows.push([]);
     }
 
+    const generalSummaryStartRowIndex = workbookRows.length;
     workbookRows.push(["Resumen general", "", "", "", "Virtual", formatNumber(totalMinutes / 60), "", ratesByModalidad.VIRTUAL.moneda, formatNumber(amountByModalidad.VIRTUAL)]);
     workbookRows.push(["", "", "", "", "Hibrida", formatNumber(minutesByModalidad.HIBRIDA / 60), "", ratesByModalidad.HIBRIDA.moneda, formatNumber(amountByModalidad.HIBRIDA)]);
     workbookRows.push(["", "", "", "", "Total", formatNumber(totalHours), "", totalCurrency, formatNumber(totalAmount)]);
+    const generalSummaryEndRowIndex = workbookRows.length - 1;
 
     const workbook = XLSX.utils.book_new();
     const unifiedSheet = XLSX.utils.aoa_to_sheet(workbookRows);
@@ -11589,7 +11615,20 @@ export class SalasLegacyService {
       fileName: reportPreview.fileName,
       contentType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
       content,
-      preview: reportPreview
+      preview: reportPreview,
+      spreadsheet: {
+        fileName: reportPreview.fileName.replace(/\.xlsx$/i, ""),
+        sheetTitle: "Informe",
+        rows: workbookRows,
+        layout: {
+          columnCount: 9,
+          titleRowIndex: 0,
+          ratesRowIndex: 1,
+          assistantSections,
+          generalSummaryStartRowIndex,
+          generalSummaryEndRowIndex
+        }
+      }
     };
   }
 
@@ -11611,16 +11650,295 @@ export class SalasLegacyService {
       );
     }
 
-    const uploaded = await uploadFileToDriveFolder({
+    if (!report.spreadsheet) {
+      throw new Error("No se pudo preparar la hoja de contaduria para Google Drive.");
+    }
+
+    const hexToRgb = (hex: string) => {
+      const value = hex.replace("#", "");
+      const normalized = value.length === 3
+        ? value.split("").map((char) => char + char).join("")
+        : value;
+      const parsed = Number.parseInt(normalized, 16);
+      return {
+        red: ((parsed >> 16) & 255) / 255,
+        green: ((parsed >> 8) & 255) / 255,
+        blue: (parsed & 255) / 255
+      };
+    };
+
+    const palette = {
+      title: hexToRgb("#163B65"),
+      titleText: hexToRgb("#FFFFFF"),
+      rates: hexToRgb("#FFF4CC"),
+      assistantHeader: hexToRgb("#0B6B56"),
+      assistantHeaderText: hexToRgb("#FFFFFF"),
+      tableHeader: hexToRgb("#DCEBFF"),
+      virtualSummary: hexToRgb("#E8F5E9"),
+      hibridaSummary: hexToRgb("#FFF3E0"),
+      totalSummary: hexToRgb("#E3F2FD"),
+      border: hexToRgb("#D0D7DE"),
+      generalTotal: hexToRgb("#1F4E79")
+    };
+
+    const rowFormatRequest = (input: {
+      sheetId: number;
+      startRowIndex: number;
+      endRowIndex: number;
+      columnCount: number;
+      backgroundColor?: { red: number; green: number; blue: number };
+      foregroundColor?: { red: number; green: number; blue: number };
+      bold?: boolean;
+      fontSize?: number;
+      horizontalAlignment?: "LEFT" | "CENTER" | "RIGHT";
+    }) => ({
+      repeatCell: {
+        range: {
+          sheetId: input.sheetId,
+          startRowIndex: input.startRowIndex,
+          endRowIndex: input.endRowIndex,
+          startColumnIndex: 0,
+          endColumnIndex: input.columnCount
+        },
+        cell: {
+          userEnteredFormat: {
+            backgroundColor: input.backgroundColor,
+            textFormat: {
+              bold: input.bold,
+              fontSize: input.fontSize,
+              foregroundColor: input.foregroundColor
+            },
+            horizontalAlignment: input.horizontalAlignment ?? "LEFT",
+            verticalAlignment: "MIDDLE",
+            wrapStrategy: "WRAP"
+          }
+        },
+        fields:
+          "userEnteredFormat(backgroundColor,textFormat,horizontalAlignment,verticalAlignment,wrapStrategy)"
+      }
+    });
+
+    const columnWidthRequest = (input: {
+      sheetId: number;
+      startIndex: number;
+      endIndex: number;
+      pixelSize: number;
+    }) => ({
+      updateDimensionProperties: {
+        range: {
+          sheetId: input.sheetId,
+          dimension: "COLUMNS",
+          startIndex: input.startIndex,
+          endIndex: input.endIndex
+        },
+        properties: {
+          pixelSize: input.pixelSize
+        },
+        fields: "pixelSize"
+      }
+    });
+
+    const gridBorderStyle = {
+      style: "SOLID",
+      color: palette.border
+    };
+
+    const blockBorderRequest = (input: {
+      sheetId: number;
+      startRowIndex: number;
+      endRowIndex: number;
+      columnCount: number;
+    }) => ({
+      updateBorders: {
+        range: {
+          sheetId: input.sheetId,
+          startRowIndex: input.startRowIndex,
+          endRowIndex: input.endRowIndex,
+          startColumnIndex: 0,
+          endColumnIndex: input.columnCount
+        },
+        top: gridBorderStyle,
+        bottom: gridBorderStyle,
+        left: gridBorderStyle,
+        right: gridBorderStyle,
+        innerHorizontal: gridBorderStyle
+      }
+    });
+
+    const layout = report.spreadsheet.layout;
+    const uploaded = await createSpreadsheetInDriveFolder({
       folderId: driveFolderId,
-      fileName: report.fileName,
-      contentType: report.contentType,
-      content: report.content
+      fileName: report.spreadsheet.fileName,
+      sheetTitle: report.spreadsheet.sheetTitle,
+      rows: report.spreadsheet.rows,
+      buildRequests: ({ sheetId, columnCount }) => {
+        const requests: Array<Record<string, unknown>> = [
+          columnWidthRequest({ sheetId, startIndex: 0, endIndex: 1, pixelSize: 230 }),
+          columnWidthRequest({ sheetId, startIndex: 1, endIndex: 2, pixelSize: 360 }),
+          columnWidthRequest({ sheetId, startIndex: 2, endIndex: 4, pixelSize: 170 }),
+          columnWidthRequest({ sheetId, startIndex: 4, endIndex: 5, pixelSize: 130 }),
+          columnWidthRequest({ sheetId, startIndex: 5, endIndex: 7, pixelSize: 120 }),
+          columnWidthRequest({ sheetId, startIndex: 7, endIndex: 9, pixelSize: 120 }),
+          rowFormatRequest({
+            sheetId,
+            startRowIndex: layout.titleRowIndex,
+            endRowIndex: layout.titleRowIndex + 1,
+            columnCount,
+            backgroundColor: palette.title,
+            foregroundColor: palette.titleText,
+            bold: true,
+            fontSize: 14
+          }),
+          rowFormatRequest({
+            sheetId,
+            startRowIndex: layout.ratesRowIndex,
+            endRowIndex: layout.ratesRowIndex + 1,
+            columnCount,
+            backgroundColor: palette.rates,
+            bold: true
+          }),
+          {
+            mergeCells: {
+              range: {
+                sheetId,
+                startRowIndex: layout.titleRowIndex,
+                endRowIndex: layout.titleRowIndex + 1,
+                startColumnIndex: 0,
+                endColumnIndex: 4
+              },
+              mergeType: "MERGE_ALL"
+            }
+          },
+          {
+            mergeCells: {
+              range: {
+                sheetId,
+                startRowIndex: layout.titleRowIndex,
+                endRowIndex: layout.titleRowIndex + 1,
+                startColumnIndex: 4,
+                endColumnIndex: columnCount
+              },
+              mergeType: "MERGE_ALL"
+            }
+          }
+        ];
+
+        for (const section of layout.assistantSections) {
+          requests.push(
+            rowFormatRequest({
+              sheetId,
+              startRowIndex: section.assistantHeaderRowIndex,
+              endRowIndex: section.assistantHeaderRowIndex + 1,
+              columnCount,
+              backgroundColor: palette.assistantHeader,
+              foregroundColor: palette.assistantHeaderText,
+              bold: true,
+              fontSize: 12
+            }),
+            rowFormatRequest({
+              sheetId,
+              startRowIndex: section.tableHeaderRowIndex,
+              endRowIndex: section.tableHeaderRowIndex + 1,
+              columnCount,
+              backgroundColor: palette.tableHeader,
+              bold: true,
+              horizontalAlignment: "CENTER"
+            }),
+            rowFormatRequest({
+              sheetId,
+              startRowIndex: section.summaryStartRowIndex,
+              endRowIndex: section.summaryStartRowIndex + 1,
+              columnCount,
+              backgroundColor: palette.virtualSummary,
+              bold: true
+            }),
+            rowFormatRequest({
+              sheetId,
+              startRowIndex: section.summaryStartRowIndex + 1,
+              endRowIndex: section.summaryStartRowIndex + 2,
+              columnCount,
+              backgroundColor: palette.hibridaSummary,
+              bold: true
+            }),
+            rowFormatRequest({
+              sheetId,
+              startRowIndex: section.summaryEndRowIndex,
+              endRowIndex: section.summaryEndRowIndex + 1,
+              columnCount,
+              backgroundColor: palette.totalSummary,
+              bold: true
+            }),
+            blockBorderRequest({
+              sheetId,
+              startRowIndex: section.assistantHeaderRowIndex,
+              endRowIndex: section.summaryEndRowIndex + 1,
+              columnCount
+            })
+          );
+
+          if (section.detailStartRowIndex <= section.detailEndRowIndex) {
+            requests.push({
+              addBanding: {
+                bandedRange: {
+                  range: {
+                    sheetId,
+                    startRowIndex: section.detailStartRowIndex,
+                    endRowIndex: section.detailEndRowIndex + 1,
+                    startColumnIndex: 0,
+                    endColumnIndex: columnCount
+                  },
+                  rowProperties: {
+                    firstBandColor: hexToRgb("#FFFFFF"),
+                    secondBandColor: hexToRgb("#F8FAFC")
+                  }
+                }
+              }
+            });
+          }
+        }
+
+        requests.push(
+          rowFormatRequest({
+            sheetId,
+            startRowIndex: layout.generalSummaryStartRowIndex,
+            endRowIndex: layout.generalSummaryStartRowIndex + 1,
+            columnCount,
+            backgroundColor: palette.virtualSummary,
+            bold: true
+          }),
+          rowFormatRequest({
+            sheetId,
+            startRowIndex: layout.generalSummaryStartRowIndex + 1,
+            endRowIndex: layout.generalSummaryStartRowIndex + 2,
+            columnCount,
+            backgroundColor: palette.hibridaSummary,
+            bold: true
+          }),
+          rowFormatRequest({
+            sheetId,
+            startRowIndex: layout.generalSummaryEndRowIndex,
+            endRowIndex: layout.generalSummaryEndRowIndex + 1,
+            columnCount,
+            backgroundColor: palette.generalTotal,
+            foregroundColor: palette.titleText,
+            bold: true,
+            fontSize: 12
+          }),
+          blockBorderRequest({
+            sheetId,
+            startRowIndex: layout.generalSummaryStartRowIndex,
+            endRowIndex: layout.generalSummaryEndRowIndex + 1,
+            columnCount
+          })
+        );
+
+        return requests;
+      }
     });
 
     return {
       monthKey: report.monthKey,
-      fileName: report.fileName,
+      fileName: report.spreadsheet.fileName,
       driveFolderId,
       driveFileId: uploaded.fileId,
       driveWebViewLink: uploaded.webViewLink
@@ -11722,15 +12040,16 @@ export class SalasLegacyService {
         zoomMeetingId: string | null;
         zoomJoinUrl: string | null;
         zoomPayloadUltimo: Prisma.JsonValue | null;
-        requiereAsistencia: boolean;
-        cuentaZoom: {
-          ownerEmail: string;
-          nombreCuenta: string;
-        } | null;
+      requiereAsistencia: boolean;
+      cuentaZoom: {
+        ownerEmail: string;
+        nombreCuenta: string;
+      } | null;
         solicitud: {
           titulo: string;
           programaNombre: string | null;
           requiereGrabacion: boolean;
+          estadoSolicitud: EstadoSolicitudSala;
           responsableNombre?: string | null;
         };
         asignaciones?: Array<{
@@ -11779,9 +12098,16 @@ export class SalasLegacyService {
           : recordingRequested
             ? null
             : false;
+      const isSolicitudCancelled =
+        event.solicitud.estadoSolicitud === EstadoSolicitudSala.CANCELADA_ADMIN ||
+        event.solicitud.estadoSolicitud === EstadoSolicitudSala.CANCELADA_DOCENTE;
+      const isCancelled =
+        assignment.estadoAsignacion === EstadoAsignacion.CANCELADO ||
+        event.estadoEvento === EstadoEventoZoom.CANCELADO ||
+        isSolicitudCancelled;
 
       const isCompleted =
-        event.estadoEvento !== EstadoEventoZoom.CANCELADO &&
+        !isCancelled &&
         (
           event.estadoEjecucion === EstadoEjecucionEvento.EJECUTADO ||
           (
@@ -11836,6 +12162,7 @@ export class SalasLegacyService {
         responsableNombre: event.solicitud.responsableNombre ?? null,
         asistenteNombre: assistantName,
         isCompleted,
+        isCancelled,
         timezone: event.timezone || "America/Montevideo"
       };
     };
@@ -11934,6 +12261,7 @@ export class SalasLegacyService {
       zoomAccountName: string | null;
       zoomHostAccount: string | null;
       isCompleted: boolean;
+      isCancelled: boolean;
       timezone: string;
     }> = [];
 
@@ -11968,14 +12296,15 @@ export class SalasLegacyService {
               nombreCuenta: true
             }
           },
-          solicitud: {
-            select: {
-              titulo: true,
-              responsableNombre: true,
-              programaNombre: true,
-              requiereGrabacion: true
-            }
-          },
+              solicitud: {
+                select: {
+                  titulo: true,
+                  responsableNombre: true,
+                  programaNombre: true,
+                  requiereGrabacion: true,
+                  estadoSolicitud: true
+                }
+              },
           asignaciones: {
             where: {
               tipoAsignacion: TipoAsignacionAsistente.PRINCIPAL,
@@ -12009,7 +12338,7 @@ export class SalasLegacyService {
           evento: event
         };
         return buildMeetingFromAssignment(fakeAssignment);
-      });
+      }).filter((meeting) => !meeting.isCancelled);
     } else if (selectedUserHasProfile && selectedUserId) {
       const assignments = await db.asignacionAsistente.findMany({
         where: {
@@ -12050,7 +12379,8 @@ export class SalasLegacyService {
                   titulo: true,
                   responsableNombre: true,
                   programaNombre: true,
-                  requiereGrabacion: true
+                  requiereGrabacion: true,
+                  estadoSolicitud: true
                 }
               }
             }
@@ -12063,7 +12393,9 @@ export class SalasLegacyService {
         }
       });
 
-      meetings = assignments.map((assignment) => buildMeetingFromAssignment(assignment));
+      meetings = assignments
+        .map((assignment) => buildMeetingFromAssignment(assignment))
+        .filter((meeting) => !meeting.isCancelled);
     }
 
     const completedMeetings = meetings.filter((meeting) => meeting.isCompleted);
@@ -12113,14 +12445,15 @@ export class SalasLegacyService {
                 nombreCuenta: true
               }
             },
-            solicitud: {
-              select: {
-                titulo: true,
-                programaNombre: true,
-                requiereGrabacion: true
+              solicitud: {
+                select: {
+                  titulo: true,
+                  programaNombre: true,
+                  requiereGrabacion: true,
+                  estadoSolicitud: true
+                }
               }
             }
-          }
         }
       }
     });
@@ -12130,7 +12463,7 @@ export class SalasLegacyService {
         userId: assignment.asistente.usuarioId,
         meeting: buildMeetingFromAssignment(assignment)
       }))
-      .filter((item) => item.meeting.isCompleted);
+      .filter((item) => !item.meeting.isCancelled && item.meeting.isCompleted);
 
     const monthKeysSet = new Set<string>();
     const monthMapByUser = new Map<string, Map<string, {
@@ -12268,7 +12601,7 @@ export class SalasLegacyService {
         completedHoursTotal: Math.round((completedMinutesTotal / 60) * 100) / 100
       },
       monthSummaries,
-      meetings: meetings.map(({ timezone: _timezone, ...meeting }) => meeting),
+      meetings: meetings.map(({ timezone: _timezone, isCancelled: _isCancelled, ...meeting }) => meeting),
       availableMonthKeys,
       assistantSummaries,
       rates: ratesByModalidad

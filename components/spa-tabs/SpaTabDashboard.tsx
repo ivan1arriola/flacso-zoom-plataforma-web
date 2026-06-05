@@ -45,7 +45,6 @@ import GroupIcon from "@mui/icons-material/Group";
 import { formatZoomDateTime } from "./spa-tabs-utils";
 import type { DashboardSummary } from "@/src/services/dashboardApi";
 import {
-  downloadMonthlyAccountingReport,
   loadAllMonthlyAccountingReportPreviews,
   loadPersonHours,
   loadTarifas,
@@ -723,8 +722,6 @@ export function SpaTabDashboard({
   const [personHoursError, setPersonHoursError] = useState("");
   const [selectedMonthKey, setSelectedMonthKey] = useState(getPreviousMonthKey());
   const [availableReportMonths, setAvailableReportMonths] = useState<string[]>([]);
-  const [isDownloadingReport, setIsDownloadingReport] = useState(false);
-  const [downloadReportError, setDownloadReportError] = useState("");
   const [isUploadingReport, setIsUploadingReport] = useState(false);
   const [uploadReportError, setUploadReportError] = useState("");
   const [uploadReportSuccess, setUploadReportSuccess] = useState("");
@@ -1119,29 +1116,9 @@ export function SpaTabDashboard({
                 </Button>
                 <Button
                   variant="contained"
-                  disabled={isDownloadingReport || !selectedMonthKey || availableReportMonths.length === 0}
-                  onClick={async () => {
-                    setDownloadReportError("");
-                    setUploadReportError("");
-                    setUploadReportSuccess("");
-                    setUploadReportLink(null);
-                    setIsDownloadingReport(true);
-                    const targetMonthKey = selectedMonthKey || getPreviousMonthKey();
-                    const result = await downloadMonthlyAccountingReport(targetMonthKey);
-                    if (!result.success) {
-                      setDownloadReportError(result.error ?? "No se pudo descargar el informe mensual.");
-                    }
-                    setIsDownloadingReport(false);
-                  }}
-                >
-                  {isDownloadingReport ? "Generando..." : "Descargar informe mensual"}
-                </Button>
-                <Button
-                  variant="contained"
                   color="success"
                   disabled={isUploadingReport || !selectedMonthKey || availableReportMonths.length === 0}
                   onClick={async () => {
-                    setDownloadReportError("");
                     setUploadReportError("");
                     setUploadReportSuccess("");
                     setUploadReportLink(null);
@@ -1162,7 +1139,7 @@ export function SpaTabDashboard({
                     setIsUploadingReport(false);
                   }}
                 >
-                  {isUploadingReport ? "Subiendo..." : "Subir informe a Drive"}
+                  {isUploadingReport ? "Subiendo..." : "Subir informe y obtener link"}
                 </Button>
                 <Button
                   variant="outlined"
@@ -1180,11 +1157,6 @@ export function SpaTabDashboard({
             {personHoursError ? (
               <Alert severity="error" sx={{ mb: 1.2 }}>
                 {personHoursError}
-              </Alert>
-            ) : null}
-            {downloadReportError ? (
-              <Alert severity="error" sx={{ mb: 1.2 }}>
-                {downloadReportError}
               </Alert>
             ) : null}
             {uploadReportError ? (

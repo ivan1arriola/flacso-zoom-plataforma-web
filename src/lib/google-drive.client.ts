@@ -8,6 +8,10 @@ import {
 
 const DRIVE_READONLY_SCOPES = ["https://www.googleapis.com/auth/drive.readonly"];
 const DRIVE_UPLOAD_SCOPES = ["https://www.googleapis.com/auth/drive"];
+const SHEETS_EDIT_SCOPES = [
+  "https://www.googleapis.com/auth/drive",
+  "https://www.googleapis.com/auth/spreadsheets"
+];
 
 export type StoredDriveRecording = {
   id: string;
@@ -219,5 +223,112 @@ export async function uploadFileToDriveFolder(params: {
       typeof response.data.webViewLink === "string" && response.data.webViewLink
         ? response.data.webViewLink
         : null
+  };
+}
+
+export async function createSpreadsheetInDriveFolder(params: {
+  folderId: string;
+  fileName: string;
+  sheetTitle?: string;
+  rows: Array<Array<string | number>>;
+  buildRequests?: (input: {
+    sheetId: number;
+    rowCount: number;
+    columnCount: number;
+  }) => Array<Record<string, unknown>>;
+}): Promise<{ fileId: string; fileName: string; webViewLink: string | null }> {
+  const folderId = params.folderId.trim();
+  if (!folderId) {
+    throw new Error("No se indicó el folder de Google Drive para crear la hoja.");
+  }
+
+  const auth = buildGoogleJwtAuth(SHEETS_EDIT_SCOPES);
+  await authorizeJwt(auth);
+
+  const drive = google.drive({ version: "v3", auth });
+  const created = await drive.files.create({
+    requestBody: {
+      name: params.fileName,
+      mimeType: "application/vnd.google-apps.spreadsheet",
+      parents: [folderId]
+    },
+    fields: "id,name,webViewLink",
+    supportsAllDrives: true
+  });
+
+  const fileId = typeof created.data.id === "string" ? created.data.id : "";
+  if (!fileId) {
+    throw new Error("Google Drive no devolvió fileId al crear la hoja de contaduría.");
+  }
+
+  const sheets = google.sheets({ version: "v4", auth });
+  const metadata = await sheets.spreadsheets.get({
+    spreadsheetId: fileId,
+    fields: "sheets.properties(sheetId,title)"
+  });
+
+  const firstSheet = metadata.data.sheets?.[0]?.properties;
+  const sheetId = typeof firstSheet?.sheetId === "number" ? firstSheet.sheetId : 0;
+  const currentTitle = typeof firstSheet?.title === "string" ? firstSheet.title : "Sheet1";
+  const sheetTitle = params.sheetTitle?.trim() || "Informe";
+  const columnCount = Math.max(1, ...params.rows.map((row) => row.length));
+  const normalizedRows = params.rows.map((row) => {
+    const nextRow = [...row];
+    while (nextRow.length < columnCount) {
+      nextRow.push("");
+    }
+    return nextRow;
+  });
+
+  await sheets.spreadsheets.values.update({
+    spreadsheetId: fileId,
+    range: `${currentTitle}!A1`,
+    valueInputOption: "USER_ENTERED",
+    requestBody: {
+      values: normalizedRows
+    }
+  });
+
+  const requests: Array<Record<string, unknown>> = [
+    {
+      updateSheetProperties: {
+        properties: {
+          sheetId,
+          title: sheetTitle,
+          gridProperties: {
+            frozenRowCount: 2
+          }
+        },
+        fields: "title,gridProperties.frozenRowCount"
+      }
+    }
+  ];
+
+  const extraRequests = params.buildRequests?.({
+    sheetId,
+    rowCount: normalizedRows.length,
+    columnCount
+  }) ?? [];
+  requests.push(...extraRequests);
+
+  if (requests.length > 0) {
+    await sheets.spreadsheets.batchUpdate({
+      spreadsheetId: fileId,
+      requestBody: {
+        requests
+      }
+    });
+  }
+
+  return {
+    fileId,
+    fileName:
+      typeof created.data.name === "string" && created.data.name
+        ? created.data.name
+        : params.fileName,
+    webViewLink:
+      typeof created.data.webViewLink === "string" && created.data.webViewLink
+        ? created.data.webViewLink
+        : `https://docs.google.com/spreadsheets/d/${fileId}/edit`
   };
 }
