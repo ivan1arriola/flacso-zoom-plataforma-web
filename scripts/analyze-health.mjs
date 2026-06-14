@@ -34,13 +34,15 @@ function parseCliThresholds(argv) {
 const IGNORED_DIRS = new Set([
   "node_modules",
   ".next",
+  ".next-dev",
   ".vercel",
   ".git",
   "dist",
   "build",
   "coverage",
   "out",
-  ".turbo"
+  ".turbo",
+  "vendor-chunks"
 ]);
 
 const IGNORED_FILES = new Set([

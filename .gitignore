@@ -1,28 +1,50 @@
-node_modules
-.next
-.next-dev
+# Dependencias
+
+node_modules/
+
+# Next.js / build output
+
+.next/
+.next-dev/
+dist/
+build/
+coverage/
+
+# Logs y reportes
+
+*.log
+reports/
+*.report
+
+# Variables de entorno
+
 .env
 .env.local
-coverage
-dist
-*.log
+.env*.local
+
+# Base de datos local
+
 prisma/dev.db
+
+# Secretos / credenciales
+
+.secrets/
 client_secret_*.apps.googleusercontent.com.json
 flacso-*-????????????.json
 
-.vercel
-.vercelignore
-.verceldeploy
+# Vercel
 
-.vercel
-.vercel deploy
-.env*.local
+.vercel/
+.verceldeploy/
 
-reports
-*.report
-solicitudes-salas-zoom
+# Codex
 
-.codex
-.codex
+.codex/
 
-.secrets/
+# Proyecto / archivos generados específicos
+
+solicitudes-salas-zoom/
+
+# Chunks o vendor generados
+
+vendor-chunks/
