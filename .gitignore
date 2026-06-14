@@ -48,3 +48,4 @@ solicitudes-salas-zoom/
 # Chunks o vendor generados
 
 vendor-chunks/
+*.zip
