@@ -1,21 +1,8 @@
 "use client";
 
-import { type FormEvent, useEffect, useMemo, useRef, useState } from "react";
+import { type ComponentProps, type FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { signIn } from "next-auth/react";
-import {
-  Alert,
-  Backdrop,
-  Box,
-  Button,
-  Chip,
-  CircularProgress,
-  Fade,
-  LinearProgress,
-  Paper,
-  Snackbar,
-  Stack,
-  Typography
-} from "@mui/material";
+import { Box } from "@mui/material";
 import {
   formatDateTime
 } from "@/src/lib/spa-home/recurrence";
@@ -31,8 +18,7 @@ import {
   loadSummary,
   loadAssignmentBoard,
   loadAssignmentSuggestion,
-  loadNextAssignmentSuggestion,
-  type AssignmentSuggestion
+  loadNextAssignmentSuggestion
 } from "@/src/services/dashboardApi";
 import {
   loadPastMeetings,
@@ -123,170 +109,25 @@ import { SpaTabEstadisticas } from "@/components/spa-tabs/SpaTabEstadisticas";
 import { SpaTabAgendaAdmin } from "@/components/spa-tabs/SpaTabAgendaAdmin";
 import { SpaTabNotificaciones } from "@/components/SpaTabNotificaciones";
 import { buildDocenteSolicitudPayload } from "@/components/spa-tabs/solicitud-payload-builder";
+import { SpaBusyOverlay } from "@/components/spa-home/SpaBusyOverlay";
+import { SpaSnackbar } from "@/components/spa-home/SpaSnackbar";
+import { useSpaBusyState } from "@/src/hooks/useSpaBusyState";
+import type {
+  CurrentUser,
+  DocenteOption,
+  MonitorOption,
+  PastMeetingZoomSeed
+} from "@/src/lib/spa-home/client-types";
+import {
+  DEFAULT_ZOOM_PAST_MONTHS_BACK,
+  buildZoomPastMonthOptions,
+  parseEmailLines,
+  readJsonSafe,
+  resolveUserAccessEmails
+} from "@/src/lib/spa-home/client-utils";
 
 
-export type CurrentUser = {
-  id: string;
-  email: string;
-  emails?: string[];
-  role: string;
-  firstName?: string | null;
-  lastName?: string | null;
-  image?: string | null;
-};
-
-type PastMeetingZoomSeed = {
-  meetingId: string;
-  topic: string;
-  startTime: string;
-  endTime: string;
-  joinUrl: string;
-  accountEmail: string;
-};
-
-type DocenteOption = {
-  value: string;
-  label: string;
-  nombre: string;
-};
-
-type MonitorOption = {
-  value: string;
-  label: string;
-  nombre: string;
-};
-
-type BusyOperationKey =
-  | "BOOTSTRAP"
-  | "SUBMIT_SOLICITUD"
-  | "DELETE_SOLICITUD"
-  | "CANCEL_SERIE"
-  | "CANCEL_INSTANCIA"
-  | "RESTORE_INSTANCIA"
-  | "UPDATE_ASISTENCIA"
-  | "GENERIC";
-
-const BUSY_MESSAGES: Record<BusyOperationKey, string[]> = {
-  BOOTSTRAP: [
-    "Cargando tu espacio de trabajo...",
-    "Verificando sesion y permisos...",
-    "Preparando informacion inicial..."
-  ],
-  SUBMIT_SOLICITUD: [
-    "Validando datos de la solicitud...",
-    "Buscando cuenta Zoom libre...",
-    "Reservando horario disponible...",
-    "Guardando solicitud en el sistema...",
-    "Finalizando registro y notificaciones..."
-  ],
-  DELETE_SOLICITUD: [
-    "Eliminando solicitud...",
-    "Desvinculando reunion en Zoom..."
-  ],
-  CANCEL_SERIE: [
-    "Cancelando serie completa...",
-    "Actualizando estado de instancias..."
-  ],
-  CANCEL_INSTANCIA: [
-    "Cancelando instancia seleccionada...",
-    "Sincronizando cambios..."
-  ],
-  RESTORE_INSTANCIA: [
-    "Descancelando instancia...",
-    "Resincronizando Zoom con la app..."
-  ],
-  UPDATE_ASISTENCIA: [
-    "Actualizando asistencia Zoom...",
-    "Aplicando cambios en instancias activas..."
-  ],
-  GENERIC: [
-    "Procesando..."
-  ]
-};
-
-const DEFAULT_ZOOM_PAST_MONTHS_BACK = 1;
-const MAX_ZOOM_PAST_MONTHS_BACK = 12;
-
-type ZoomPastMonthOption = {
-  value: string;
-  label: string;
-  monthsBack: number;
-};
-
-async function readJsonSafe<T>(response: Response): Promise<T | null> {
-  const text = await response.text().catch(() => "");
-  if (!text) return null;
-  try {
-    return JSON.parse(text) as T;
-  } catch {
-    return null;
-  }
-}
-
-function buildZoomPastMonthOptions(maxMonthsBack = MAX_ZOOM_PAST_MONTHS_BACK): ZoomPastMonthOption[] {
-  const now = new Date();
-  const startOfCurrentMonth = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1);
-  const formatter = new Intl.DateTimeFormat("es-UY", {
-    month: "long",
-    year: "numeric",
-    timeZone: "UTC"
-  });
-
-  return Array.from({ length: maxMonthsBack }, (_unused, index) => {
-    const monthDate = new Date(startOfCurrentMonth);
-    monthDate.setUTCMonth(monthDate.getUTCMonth() - index);
-    const value = `${monthDate.getUTCFullYear()}-${String(monthDate.getUTCMonth() + 1).padStart(2, "0")}`;
-    return {
-      value,
-      label: formatter.format(monthDate),
-      monthsBack: index + 1
-    };
-  });
-}
-
-function parseEmailLines(raw: string): string[] {
-  const unique = new Set<string>();
-  for (const line of raw.split(/\r?\n/)) {
-    const normalized = line.trim().toLowerCase();
-    if (!normalized) continue;
-    unique.add(normalized);
-  }
-  return Array.from(unique.values());
-}
-
-function resolveSnackbarSeverity(message: string): "success" | "info" | "warning" | "error" {
-  const normalized = message.trim().toLowerCase();
-  if (!normalized) return "info";
-
-  if (
-    /(no se pudo|error|fall[oó]|no autenticado|unauthorized|inv[aá]lido|debes|denegad|prohibido|vencido|falta)/i.test(normalized)
-  ) {
-    return /(no autenticado|unauthorized|denegad|error|prohibido)/i.test(normalized) ? "error" : "warning";
-  }
-
-  if (
-    /(correctamente|enviado|cread|actualizad|registrad|habilitad|sincronizad|listo|eliminad|cancelad|descancelad|resuelto|asignacion)/i.test(normalized)
-  ) {
-    return "success";
-  }
-
-  return "info";
-}
-
-function resolveUserAccessEmails(
-  user?: { email?: string | null; emails?: string[] | null } | null
-): string[] {
-  if (!user) return [];
-  const unique = new Set<string>();
-  const primary = user.email?.trim().toLowerCase();
-  if (primary) unique.add(primary);
-  for (const email of user.emails ?? []) {
-    const normalized = email.trim().toLowerCase();
-    if (!normalized) continue;
-    unique.add(normalized);
-  }
-  return Array.from(unique.values());
-}
+export type { CurrentUser } from "@/src/lib/spa-home/client-types";
 
 export function SpaHomeScreen() {
   const hasBootstrappedRef = useRef(false);
@@ -301,7 +142,6 @@ export function SpaHomeScreen() {
   const {
     solicitudes,
     setSolicitudes,
-    docenteSolicitudesView,
     setDocenteSolicitudesView,
     isSubmittingSolicitud,
     setIsSubmittingSolicitud,
@@ -461,7 +301,6 @@ export function SpaHomeScreen() {
   const canSeeSolicitudes = canAccessTabForRole("solicitudes", effectiveRole);
   const canSeeAgendaAdmin = canAccessTabForRole("agenda_admin", effectiveRole);
   const canSeeProgramas = canAccessTabForRole("programas", effectiveRole);
-  const isDocente = useMemo(() => effectiveRole === "DOCENTE", [effectiveRole]);
   const canSendSolicitudReminder = useMemo(
     () => ["DOCENTE", "ADMINISTRADOR"].includes(effectiveRole),
     [effectiveRole]
@@ -723,38 +562,7 @@ export function SpaHomeScreen() {
     return byAccountId;
   }, [zoomAccounts]);
 
-  const isGlobalBusy = useMemo(
-    () =>
-      loading ||
-      isSubmittingSolicitud ||
-      Boolean(deletingSolicitudId) ||
-      Boolean(cancellingSerieSolicitudId) ||
-      Boolean(cancellingInstanciaKey) ||
-      Boolean(restoringInstanciaKey) ||
-      Boolean(updatingAsistenciaSolicitudId) ||
-      Boolean(updatingAsistenciaInstanciaKey),
-    [
-      loading,
-      isSubmittingSolicitud,
-      deletingSolicitudId,
-      cancellingSerieSolicitudId,
-      cancellingInstanciaKey,
-      restoringInstanciaKey,
-      updatingAsistenciaSolicitudId,
-      updatingAsistenciaInstanciaKey
-    ]
-  );
-
-  const activeBusyOperation = useMemo<BusyOperationKey>(() => {
-    if (loading) return "BOOTSTRAP";
-    if (isSubmittingSolicitud) return "SUBMIT_SOLICITUD";
-    if (deletingSolicitudId) return "DELETE_SOLICITUD";
-    if (cancellingSerieSolicitudId) return "CANCEL_SERIE";
-    if (cancellingInstanciaKey) return "CANCEL_INSTANCIA";
-    if (restoringInstanciaKey) return "RESTORE_INSTANCIA";
-    if (updatingAsistenciaSolicitudId || updatingAsistenciaInstanciaKey) return "UPDATE_ASISTENCIA";
-    return "GENERIC";
-  }, [
+  const { isGlobalBusy, globalBusyLabel } = useSpaBusyState({
     loading,
     isSubmittingSolicitud,
     deletingSolicitudId,
@@ -763,30 +571,7 @@ export function SpaHomeScreen() {
     restoringInstanciaKey,
     updatingAsistenciaSolicitudId,
     updatingAsistenciaInstanciaKey
-  ]);
-  const [busyMessageIndex, setBusyMessageIndex] = useState(0);
-  const busyMessageSequence = useMemo(
-    () => BUSY_MESSAGES[activeBusyOperation] ?? BUSY_MESSAGES.GENERIC,
-    [activeBusyOperation]
-  );
-  const globalBusyLabel = useMemo(
-    () => busyMessageSequence[busyMessageIndex] ?? busyMessageSequence[0] ?? "Procesando...",
-    [busyMessageSequence, busyMessageIndex]
-  );
-
-  useEffect(() => {
-    setBusyMessageIndex(0);
-    if (!isGlobalBusy) return;
-    if (busyMessageSequence.length <= 1) return;
-
-    const intervalId = window.setInterval(() => {
-      setBusyMessageIndex((prev) => (prev + 1) % busyMessageSequence.length);
-    }, 2500);
-
-    return () => {
-      window.clearInterval(intervalId);
-    };
-  }, [isGlobalBusy, busyMessageSequence]);
+  });
 
   useEffect(() => {
     void bootstrap();
@@ -973,20 +758,7 @@ export function SpaHomeScreen() {
 
   useEffect(() => {
     if ((tab !== "cuentas" && tab !== "manual") || !canSeeZoomAccounts) return;
-    (async () => {
-      setIsLoadingZoomAccounts(true);
-      try {
-        const result = await loadZoomAccounts();
-        if (result.error) {
-          setMessage(result.error);
-          return;
-        }
-        setZoomGroupName(result.groupName);
-        setZoomAccounts(result.accounts);
-      } finally {
-        setIsLoadingZoomAccounts(false);
-      }
-    })();
+    void refreshZoomAccounts();
   }, [tab, canSeeZoomAccounts]);
 
   useEffect(() => {
@@ -1001,15 +773,7 @@ export function SpaHomeScreen() {
 
   useEffect(() => {
     if (tab !== "usuarios" || !canSeeUsers) return;
-    (async () => {
-      setIsLoadingUsers(true);
-      try {
-        const users = await loadUsers();
-        if (users) setUsers(users);
-      } finally {
-        setIsLoadingUsers(false);
-      }
-    })();
+    void refreshUsers();
   }, [tab, canSeeUsers]);
 
   useEffect(() => {
@@ -1758,58 +1522,6 @@ export function SpaHomeScreen() {
     }
   }
 
-  async function disableSolicitudAssistanceForInstance(input: {
-    solicitudId: string;
-    titulo: string;
-    eventoId?: string | null;
-    startTime: string;
-  }) {
-    const instanceDateLabel = formatDateTime(input.startTime);
-    const confirmMessage =
-      `Se quitara la asistencia Zoom solo para la instancia ${instanceDateLabel} de "${input.titulo}". Si habia una persona asignada recibira correo de cancelacion. ¿Continuar?`;
-    if (!window.confirm(confirmMessage)) {
-      return;
-    }
-
-    const instanceKey = `${input.solicitudId}:${input.eventoId ?? input.startTime}`;
-    setMessage("");
-    setUpdatingAsistenciaInstanciaKey(instanceKey);
-
-    try {
-      const response = await updateSolicitudInstanciaAsistenciaApi({
-        solicitudId: input.solicitudId,
-        eventoId: input.eventoId ?? undefined,
-        inicioProgramadoAt: input.startTime,
-        requiereAsistencia: false
-      });
-
-      if (!response.success) {
-        setMessage(response.error ?? "No se pudo deshabilitar asistencia Zoom para la instancia.");
-        return;
-      }
-
-      if (response.alreadyDisabled) {
-        setMessage("La instancia ya tenia asistencia Zoom deshabilitada.");
-      } else {
-        const cancelledAssignments = response.cancelledAssignments ?? 0;
-        const notifiedAssistants = response.notifiedAssistants ?? 0;
-        setMessage(
-          `Asistencia Zoom deshabilitada para la instancia ${instanceDateLabel} (asignaciones canceladas: ${cancelledAssignments}, correos enviados: ${notifiedAssistants}).`
-        );
-      }
-
-      await refreshAfterSolicitudMutation();
-    } catch (error) {
-      setMessage(
-        error instanceof Error
-          ? error.message
-          : "No se pudo deshabilitar asistencia Zoom para la instancia."
-      );
-    } finally {
-      setUpdatingAsistenciaInstanciaKey(null);
-    }
-  }
-
   async function setInterest(eventoId: string, estadoInteres: "ME_INTERESA" | "NO_ME_INTERESA" | "RETIRADO") {
     setUpdatingInterestId(eventoId);
     const previousAgenda = agendaLibre;
@@ -1961,17 +1673,6 @@ export function SpaHomeScreen() {
     }
   }
 
-  function applySuggestionSelection(suggestion: AssignmentSuggestion | null) {
-    if (!suggestion) return;
-    setSelectedAssistantByEvent((current) => {
-      const next = { ...current };
-      for (const event of suggestion.events) {
-        next[event.eventoId] = event.asistenteZoomId ?? "";
-      }
-      return next;
-    });
-  }
-
   async function suggestMonthlyAssignment() {
     setIsLoadingSuggestion(true);
     try {
@@ -2072,6 +1773,31 @@ export function SpaHomeScreen() {
       setMessage(error instanceof Error ? error.message : "No se pudo sincronizar el perfil con Google.");
     } finally {
       setIsSyncingGoogleProfile(false);
+    }
+  }
+
+  async function refreshUsers() {
+    setIsLoadingUsers(true);
+    try {
+      const users = await loadUsers();
+      if (users) setUsers(users);
+    } finally {
+      setIsLoadingUsers(false);
+    }
+  }
+
+  async function refreshZoomAccounts() {
+    setIsLoadingZoomAccounts(true);
+    try {
+      const result = await loadZoomAccounts();
+      if (result.error) {
+        setMessage(result.error);
+        return;
+      }
+      setZoomGroupName(result.groupName);
+      setZoomAccounts(result.accounts);
+    } finally {
+      setIsLoadingZoomAccounts(false);
     }
   }
 
@@ -2522,6 +2248,54 @@ export function SpaHomeScreen() {
     }
   }
 
+  const solicitudesTabProps: Omit<
+    ComponentProps<typeof SpaTabSolicitudes>,
+    "docenteSolicitudesView" | "setDocenteSolicitudesView"
+  > = {
+    solicitudes,
+    form,
+    updateForm,
+    onDeleteSolicitud: deleteSolicitud,
+    deletingSolicitudId,
+    onCancelSolicitudSerie: cancelSolicitudSerie,
+    cancellingSerieSolicitudId,
+    onCancelSolicitudInstancia: cancelSolicitudInstancia,
+    cancellingInstanciaKey,
+    onRestoreSolicitudInstancia: restoreSolicitudInstancia,
+    restoringInstanciaKey,
+    canAddInstances: canEditSolicitudAssistance,
+    addingInstanceSolicitudId: addingInstanciaSolicitudId,
+    onAddInstance: addSolicitudInstancia,
+    canSendReminder: canSendSolicitudReminder,
+    sendingReminderSolicitudId,
+    onSendReminder: sendSolicitudReminder,
+    canEditMeeting: canEditSolicitudAssistance,
+    onEditMeeting: editUpcomingSolicitudMeeting,
+    canEditMeetingDuration: canEditSolicitudDuration,
+    updatingMeetingDurationEventId,
+    onEditMeetingDuration: editSolicitudMeetingDuration,
+    canReassignRecurringSolicitud: canDelegateSolicitudResponsable,
+    onReassignRecurringSolicitud: reassignRecurringSolicitudResponsable,
+    canEditAssistance: canEditSolicitudAssistance,
+    updatingAssistanceSolicitudId: updatingAsistenciaSolicitudId,
+    updatingAssistanceInstanceKey: updatingAsistenciaInstanciaKey,
+    onEnableAssistance: enableSolicitudAssistance,
+    onToggleAssistanceForInstance: updateSolicitudAssistanceForInstance,
+    canDeleteSolicitud: canCreateSolicitudShortcut,
+    canRestoreInstances: canEditSolicitudAssistance,
+    isSubmittingSolicitud,
+    canCreateShortcut: canCreateSolicitudShortcut,
+    canDelegateResponsable: canDelegateSolicitudResponsable,
+    responsableOptions,
+    docenteLinkedEmailOptions,
+    programaOptions,
+    isCreatingPrograma,
+    onCreatePrograma: createProgramaOnDemand,
+    viewerRole: effectiveRole,
+    onSubmit: submitDocenteSolicitud,
+    isLoading: isLoadingSolicitudes
+  };
+
   return (
     <Box component="section">
       {tab === "dashboard" && (
@@ -2553,50 +2327,9 @@ export function SpaHomeScreen() {
 
       {tab === "crear_reunion" && canSeeSolicitudes && (
         <SpaTabSolicitudes
-          solicitudes={solicitudes}
-          form={form}
-          updateForm={updateForm}
-          onDeleteSolicitud={deleteSolicitud}
-          deletingSolicitudId={deletingSolicitudId}
-          onCancelSolicitudSerie={cancelSolicitudSerie}
-          cancellingSerieSolicitudId={cancellingSerieSolicitudId}
-          onCancelSolicitudInstancia={cancelSolicitudInstancia}
-          cancellingInstanciaKey={cancellingInstanciaKey}
-          onRestoreSolicitudInstancia={restoreSolicitudInstancia}
-          restoringInstanciaKey={restoringInstanciaKey}
-          canAddInstances={canEditSolicitudAssistance}
-          addingInstanceSolicitudId={addingInstanciaSolicitudId}
-          onAddInstance={addSolicitudInstancia}
-          canSendReminder={canSendSolicitudReminder}
-          sendingReminderSolicitudId={sendingReminderSolicitudId}
-          onSendReminder={sendSolicitudReminder}
-          canEditMeeting={canEditSolicitudAssistance}
-          onEditMeeting={editUpcomingSolicitudMeeting}
-          canEditMeetingDuration={canEditSolicitudDuration}
-          updatingMeetingDurationEventId={updatingMeetingDurationEventId}
-          onEditMeetingDuration={editSolicitudMeetingDuration}
-          canReassignRecurringSolicitud={canDelegateSolicitudResponsable}
-          onReassignRecurringSolicitud={reassignRecurringSolicitudResponsable}
-          canEditAssistance={canEditSolicitudAssistance}
-          updatingAssistanceSolicitudId={updatingAsistenciaSolicitudId}
-          updatingAssistanceInstanceKey={updatingAsistenciaInstanciaKey}
-          onEnableAssistance={enableSolicitudAssistance}
-          onToggleAssistanceForInstance={updateSolicitudAssistanceForInstance}
-          canDeleteSolicitud={canCreateSolicitudShortcut}
-          canRestoreInstances={canEditSolicitudAssistance}
-          isSubmittingSolicitud={isSubmittingSolicitud}
-          canCreateShortcut={canCreateSolicitudShortcut}
-          canDelegateResponsable={canDelegateSolicitudResponsable}
-          responsableOptions={responsableOptions}
-          docenteLinkedEmailOptions={docenteLinkedEmailOptions}
-          programaOptions={programaOptions}
-          isCreatingPrograma={isCreatingPrograma}
-          onCreatePrograma={createProgramaOnDemand}
+          {...solicitudesTabProps}
           docenteSolicitudesView="form"
           setDocenteSolicitudesView={() => {}}
-          viewerRole={effectiveRole}
-          onSubmit={submitDocenteSolicitud}
-          isLoading={isLoadingSolicitudes}
         />
       )}
 
@@ -2606,50 +2339,9 @@ export function SpaHomeScreen() {
 
       {tab === "solicitudes" && canSeeSolicitudes && (
         <SpaTabSolicitudes
-          solicitudes={solicitudes}
-          form={form}
-          updateForm={updateForm}
-          onDeleteSolicitud={deleteSolicitud}
-          deletingSolicitudId={deletingSolicitudId}
-          onCancelSolicitudSerie={cancelSolicitudSerie}
-          cancellingSerieSolicitudId={cancellingSerieSolicitudId}
-          onCancelSolicitudInstancia={cancelSolicitudInstancia}
-          cancellingInstanciaKey={cancellingInstanciaKey}
-          onRestoreSolicitudInstancia={restoreSolicitudInstancia}
-          restoringInstanciaKey={restoringInstanciaKey}
-          canAddInstances={canEditSolicitudAssistance}
-          addingInstanceSolicitudId={addingInstanciaSolicitudId}
-          onAddInstance={addSolicitudInstancia}
-          canSendReminder={canSendSolicitudReminder}
-          sendingReminderSolicitudId={sendingReminderSolicitudId}
-          onSendReminder={sendSolicitudReminder}
-          canEditMeeting={canEditSolicitudAssistance}
-          onEditMeeting={editUpcomingSolicitudMeeting}
-          canEditMeetingDuration={canEditSolicitudDuration}
-          updatingMeetingDurationEventId={updatingMeetingDurationEventId}
-          onEditMeetingDuration={editSolicitudMeetingDuration}
-          canReassignRecurringSolicitud={canDelegateSolicitudResponsable}
-          onReassignRecurringSolicitud={reassignRecurringSolicitudResponsable}
-          canEditAssistance={canEditSolicitudAssistance}
-          updatingAssistanceSolicitudId={updatingAsistenciaSolicitudId}
-          updatingAssistanceInstanceKey={updatingAsistenciaInstanciaKey}
-          onEnableAssistance={enableSolicitudAssistance}
-          onToggleAssistanceForInstance={updateSolicitudAssistanceForInstance}
-          canDeleteSolicitud={canCreateSolicitudShortcut}
-          canRestoreInstances={canEditSolicitudAssistance}
-          isSubmittingSolicitud={isSubmittingSolicitud}
-          canCreateShortcut={canCreateSolicitudShortcut}
-          canDelegateResponsable={canDelegateSolicitudResponsable}
-          responsableOptions={responsableOptions}
-          docenteLinkedEmailOptions={docenteLinkedEmailOptions}
-          programaOptions={programaOptions}
-          isCreatingPrograma={isCreatingPrograma}
-          onCreatePrograma={createProgramaOnDemand}
+          {...solicitudesTabProps}
           docenteSolicitudesView="list"
           setDocenteSolicitudesView={() => {}}
-          viewerRole={effectiveRole}
-          onSubmit={submitDocenteSolicitud}
-          isLoading={isLoadingSolicitudes}
         />
       )}
 
@@ -2777,20 +2469,7 @@ export function SpaHomeScreen() {
           expandedZoomAccountId={expandedZoomAccountId}
           setExpandedZoomAccountId={setExpandedZoomAccountId}
           onRefresh={() => {
-            setIsLoadingZoomAccounts(true);
-            (async () => {
-              try {
-                const result = await loadZoomAccounts();
-                if (result.error) {
-                  setMessage(result.error);
-                  return;
-                }
-                setZoomGroupName(result.groupName);
-                setZoomAccounts(result.accounts);
-              } finally {
-                setIsLoadingZoomAccounts(false);
-              }
-            })();
+            void refreshZoomAccounts();
           }}
         />
       )}
@@ -2845,15 +2524,7 @@ export function SpaHomeScreen() {
           onResendActivationLink={resendUserActivationLink}
           onSendSelfActivationLinkTest={sendSelfActivationLinkTest}
           onRefresh={() => {
-            setIsLoadingUsers(true);
-            (async () => {
-              try {
-                const users = await loadUsers();
-                if (users) setUsers(users);
-              } finally {
-                setIsLoadingUsers(false);
-              }
-            })();
+            void refreshUsers();
           }}
         />
       )}
@@ -2863,15 +2534,7 @@ export function SpaHomeScreen() {
           users={users}
           isLoadingUsers={isLoadingUsers}
           onRefresh={() => {
-            setIsLoadingUsers(true);
-            (async () => {
-              try {
-                const users = await loadUsers();
-                if (users) setUsers(users);
-              } finally {
-                setIsLoadingUsers(false);
-              }
-            })();
+            void refreshUsers();
           }}
         />
       )}
@@ -2959,92 +2622,8 @@ export function SpaHomeScreen() {
           }}
         />
       )}
-      <Snackbar
-        open={Boolean(message)}
-        anchorOrigin={{ vertical: "top", horizontal: "right" }}
-        onClose={(_, reason) => {
-          if (reason === "clickaway") return;
-          setMessage("");
-        }}
-        sx={{
-          mt: { xs: 7, sm: 8 },
-          width: { xs: "calc(100% - 16px)", sm: "auto" },
-          maxWidth: { xs: "calc(100% - 16px)", sm: 860 }
-        }}
-      >
-        <Alert
-          severity={resolveSnackbarSeverity(message)}
-          variant="filled"
-          onClose={() => setMessage("")}
-          sx={{
-            width: "100%",
-            alignItems: "center",
-            boxShadow: "0 8px 32px rgba(0,0,0,0.12)",
-            borderRadius: 2
-          }}
-        >
-          {message}
-        </Alert>
-      </Snackbar>
-
-      <Fade in={isGlobalBusy}>
-        <LinearProgress
-          sx={{
-            position: "fixed",
-            top: 0,
-            left: 0,
-            right: 0,
-            zIndex: (theme) => theme.zIndex.modal + 20,
-            height: 3,
-            backgroundColor: "transparent",
-            "& .MuiLinearProgress-bar": {
-              background: "linear-gradient(90deg, #1f4b8f, #f9b503)"
-            }
-          }}
-        />
-      </Fade>
-
-      <Backdrop
-        open={isGlobalBusy}
-        sx={{
-          zIndex: (theme) => theme.zIndex.modal + 10,
-          color: "#fff",
-          backdropFilter: "blur(6px)",
-          backgroundColor: "rgba(31, 75, 143, 0.15)",
-          display: "flex",
-          flexDirection: "column",
-          gap: 3
-        }}
-      >
-        <Box sx={{ position: "relative", display: "inline-flex" }}>
-          <CircularProgress 
-            size={64} 
-            thickness={2} 
-            sx={{ color: "primary.main", opacity: 0.3 }} 
-          />
-          <CircularProgress
-            size={64}
-            thickness={4}
-            sx={{
-              color: "primary.main",
-              position: "absolute",
-              left: 0,
-              animationDuration: "800ms",
-              [`& .MuiCircularProgress-circle`]: {
-                strokeLinecap: "round",
-              },
-            }}
-          />
-        </Box>
-        <Stack spacing={1} alignItems="center">
-          <Typography variant="h6" sx={{ color: "primary.main", fontWeight: 800, textShadow: "0 2px 4px rgba(0,0,0,0.05)" }}>
-            {globalBusyLabel}
-          </Typography>
-          <Typography variant="caption" sx={{ color: "text.secondary", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.1em" }}>
-            Por favor, espera un momento
-          </Typography>
-        </Stack>
-      </Backdrop>
+      <SpaSnackbar message={message} onClose={() => setMessage("")} />
+      <SpaBusyOverlay open={isGlobalBusy} label={globalBusyLabel} />
     </Box>
   );
 }
