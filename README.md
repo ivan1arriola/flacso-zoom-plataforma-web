@@ -1,8 +1,8 @@
-# FLACSO Zoom Web
+# FLACSO Zoom Plataforma Web
 
 App web principal para gestion institucional de solicitudes Zoom, cobertura de asistencia, asignaciones y base economica.
 
-Este proyecto representa la capa web pensada para Vercel. La sincronizacion de grabaciones Zoom/Drive vive por separado en `../flacso-zoom-drive-desktop`.
+Este proyecto representa la capa web pensada para Vercel. La sincronizacion de grabaciones Zoom/Drive vive por separado en `../flacso-zoom-sincronizador-desktop`.
 
 ## Estado actual
 

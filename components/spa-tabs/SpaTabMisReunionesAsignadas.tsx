@@ -1,12 +1,10 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   Alert,
   Box,
   Button,
-  Card,
-  CardContent,
   Chip,
   CircularProgress,
   Skeleton,
@@ -20,12 +18,12 @@ import {
   Paper
 } from "@mui/material";
 import ContentCopyIcon from "@mui/icons-material/ContentCopy";
+import DownloadRoundedIcon from "@mui/icons-material/DownloadRounded";
 import EventIcon from "@mui/icons-material/Event";
 import ScheduleIcon from "@mui/icons-material/Schedule";
 import PersonIcon from "@mui/icons-material/Person";
 import LayersIcon from "@mui/icons-material/Layers";
 import BusinessIcon from "@mui/icons-material/Business";
-import GoogleIcon from "@mui/icons-material/Google";
 import VisibilityIcon from "@mui/icons-material/Visibility";
 import VisibilityOffIcon from "@mui/icons-material/VisibilityOff";
 import KeyIcon from "@mui/icons-material/Key";
@@ -33,7 +31,6 @@ import LinkIcon from "@mui/icons-material/Link";
 import WarningAmberRoundedIcon from "@mui/icons-material/WarningAmberRounded";
 import EditNoteIcon from "@mui/icons-material/EditNote";
 import CommentIcon from "@mui/icons-material/Comment";
-import HistoryEduIcon from "@mui/icons-material/HistoryEdu";
 
 import {
   loadPersonHours,
@@ -43,7 +40,6 @@ import {
 import { reportMeetingDuration, updateUpcomingZoomEvent } from "@/src/services/agendaApi";
 import { updatePastMeeting } from "@/src/services/solicitudesApi";
 import { Dialog, DialogTitle, DialogContent, DialogActions, TextField, InputAdornment } from "@mui/material";
-import { syncUpcomingMeetingsToGoogleCalendar } from "@/src/services/userApi";
 
 interface SpaTabMisReunionesAsignadasProps {
   userId: string;
@@ -103,27 +99,85 @@ function toUtcCalendarStamp(value: string): string {
   return `${year}${month}${day}T${hour}${minute}${second}Z`;
 }
 
-function buildGoogleCalendarUrl(meeting: PersonHoursMeeting): string {
-  const text = meeting.titulo || "Reunión Zoom";
-  const start = toUtcCalendarStamp(meeting.inicioProgramadoAt || meeting.inicioAt);
-  const end = toUtcCalendarStamp(meeting.finProgramadoAt || meeting.finAt);
+function escapeIcsText(value: string): string {
+  return value
+    .replace(/\\/g, "\\\\")
+    .replace(/\r\n/g, "\\n")
+    .replace(/\n/g, "\\n")
+    .replace(/;/g, "\\;")
+    .replace(/,/g, "\\,");
+}
+
+function slugifyForFileName(value: string): string {
+  const normalized = value
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 60);
+  return normalized || "reunion";
+}
+
+function buildMeetingIcsContent(meeting: PersonHoursMeeting): string {
+  const title = meeting.titulo || "Reunion Zoom";
+  const startIso = meeting.inicioProgramadoAt || meeting.inicioAt;
+  const endIso = meeting.finProgramadoAt || meeting.finAt;
+  const dtStamp = toUtcCalendarStamp(new Date().toISOString());
+  const dtStart = toUtcCalendarStamp(startIso);
+  const dtEnd = toUtcCalendarStamp(endIso);
   const meetingId = resolveMeetingId(meeting) ?? "-";
   const joinUrl = resolveJoinUrl(meeting);
-  
+
   const details = [
     `Programa: ${meeting.programaNombre || "Sin programa"}`,
+    `Responsable: ${meeting.responsableNombre || "No definido"}`,
+    meeting.asistenteNombre ? `Asistente Zoom: ${meeting.asistenteNombre}` : null,
     `Meeting ID: ${meetingId}`,
     joinUrl ? `Zoom: ${joinUrl}` : null
-  ].filter(Boolean).join("\n");
+  ].filter(Boolean) as string[];
 
-  const params = new URLSearchParams({
-    action: "TEMPLATE",
-    text,
-    dates: `${start}/${end}`,
-    details,
-    location: "Zoom"
-  });
-  return `https://calendar.google.com/calendar/render?${params.toString()}`;
+  const uidSeed = meeting.assignmentId ?? meeting.eventId ?? startIso;
+  const lines = [
+    "BEGIN:VCALENDAR",
+    "VERSION:2.0",
+    "PRODID:-//FLACSO Uruguay//Plataforma Zoom//ES",
+    "CALSCALE:GREGORIAN",
+    "METHOD:PUBLISH",
+    "BEGIN:VEVENT",
+    `UID:${uidSeed}@flacso-uruguay`,
+    `DTSTAMP:${dtStamp}`,
+    `DTSTART:${dtStart}`,
+    `DTEND:${dtEnd}`,
+    `SUMMARY:${escapeIcsText(title)}`,
+    `DESCRIPTION:${escapeIcsText(details.join("\n"))}`,
+    "LOCATION:Zoom",
+    "END:VEVENT",
+    "END:VCALENDAR"
+  ];
+
+  if (joinUrl) {
+    lines.splice(lines.length - 2, 0, `URL:${escapeIcsText(joinUrl)}`);
+  }
+
+  return lines.join("\r\n");
+}
+
+function downloadMeetingIcs(meeting: PersonHoursMeeting): void {
+  const content = buildMeetingIcsContent(meeting);
+  const blob = new Blob([content], { type: "text/calendar;charset=utf-8" });
+  const objectUrl = URL.createObjectURL(blob);
+  const dateLabel = (meeting.inicioProgramadoAt || meeting.inicioAt).slice(0, 10).replace(/[^0-9]/g, "");
+  const fileName = `${slugifyForFileName(meeting.titulo || "reunion")}-${dateLabel}-${meeting.eventId}.ics`;
+  const anchor = document.createElement("a");
+
+  anchor.href = objectUrl;
+  anchor.download = fileName;
+  anchor.style.display = "none";
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  URL.revokeObjectURL(objectUrl);
 }
 
 function getDocenteAssistantStatus(meeting: PersonHoursMeeting): {
@@ -166,9 +220,6 @@ export function SpaTabMisReunionesAsignadas({ userId, role }: SpaTabMisReuniones
   const [meetings, setMeetings] = useState<PersonHoursMeeting[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState("");
-  const [calendarSyncMessage, setCalendarSyncMessage] = useState("");
-  const [calendarSyncError, setCalendarSyncError] = useState("");
-  const [isCalendarSyncing, setIsCalendarSyncing] = useState(false);
   const [passwords, setPasswords] = useState<Record<string, string>>({});
   const [passwordLoading, setPasswordLoading] = useState<Record<string, boolean>>({});
   const [showPasswords, setShowPasswords] = useState<Record<string, boolean>>({});
@@ -180,25 +231,6 @@ export function SpaTabMisReunionesAsignadas({ userId, role }: SpaTabMisReuniones
   const [updatingModalityEventId, setUpdatingModalityEventId] = useState<string | null>(null);
   const isDocente = role === "DOCENTE";
   const isAdmin = role === "ADMINISTRADOR";
-  const syncTimeoutRef = useRef<number | null>(null);
-  const syncInFlightRef = useRef(false);
-  const lastSyncedSignatureRef = useRef("");
-
-  const canAutoSyncGoogleCalendar =
-    role === "DOCENTE" || role === "ASISTENTE_ZOOM" || role === "ADMINISTRADOR";
-
-  const meetingsSyncSignature = useMemo(() => {
-    return meetings
-      .map((meeting) => {
-        return [
-          meeting.assignmentId ?? "",
-          meeting.eventId,
-          meeting.inicioProgramadoAt || meeting.inicioAt,
-          meeting.finProgramadoAt || meeting.finAt
-        ].join(":");
-      })
-      .join("|");
-  }, [meetings]);
 
   async function toggleModality(meeting: PersonHoursMeeting) {
     if (!isAdmin) return;
@@ -238,7 +270,6 @@ export function SpaTabMisReunionesAsignadas({ userId, role }: SpaTabMisReuniones
       const now = Date.now();
       const future = payload.meetings.filter(m => {
         const endDate = new Date(m.finAt);
-        const startMs = new Date(m.inicioAt).getTime();
         // Allow meetings that haven't finished yet
         return !m.isCompleted && endDate.getTime() >= now;
       }).sort((a, b) => new Date(a.inicioAt).getTime() - new Date(b.inicioAt).getTime());
@@ -313,56 +344,8 @@ export function SpaTabMisReunionesAsignadas({ userId, role }: SpaTabMisReuniones
     void refresh();
   }, [userId]);
 
-  const runCalendarSync = useCallback(
-    async (source: "auto" | "manual") => {
-      if (!userId || !canAutoSyncGoogleCalendar || isLoading || meetings.length === 0) return;
-      if (syncInFlightRef.current) return;
-
-      syncInFlightRef.current = true;
-      setIsCalendarSyncing(true);
-      if (source === "manual") setCalendarSyncError("");
-
-      try {
-        const result = await syncUpcomingMeetingsToGoogleCalendar();
-        if (!result.success) {
-          setCalendarSyncError(result.error ?? "No se pudo sincronizar con Google Calendar.");
-          return;
-        }
-
-        const created = result.created ?? 0;
-        const updated = result.updated ?? 0;
-        const skipped = result.skipped ?? 0;
-        const total = result.total ?? meetings.length;
-        setCalendarSyncError("");
-        setCalendarSyncMessage(
-          result.message ??
-            `Sincronización automática completada: ${created + updated}/${total} reuniones (${created} nuevas, ${updated} actualizadas, ${skipped} omitidas).`
-        );
-        lastSyncedSignatureRef.current = meetingsSyncSignature;
-      } finally {
-        syncInFlightRef.current = false;
-        setIsCalendarSyncing(false);
-      }
-    },
-    [canAutoSyncGoogleCalendar, isLoading, meetings.length, meetingsSyncSignature, userId]
-  );
-
   useEffect(() => {
-    if (!canAutoSyncGoogleCalendar || !meetingsSyncSignature || isLoading) return;
-    if (lastSyncedSignatureRef.current === meetingsSyncSignature) return;
-
-    if (syncTimeoutRef.current) window.clearTimeout(syncTimeoutRef.current);
-    syncTimeoutRef.current = window.setTimeout(() => {
-      void runCalendarSync("auto");
-    }, 1200);
-
-    return () => {
-      if (syncTimeoutRef.current) window.clearTimeout(syncTimeoutRef.current);
-    };
-  }, [canAutoSyncGoogleCalendar, isLoading, meetingsSyncSignature, runCalendarSync]);
-
-  useEffect(() => {
-    if (!canAutoSyncGoogleCalendar || !userId) return;
+    if (!userId) return;
 
     const intervalId = window.setInterval(() => {
       void refresh();
@@ -371,7 +354,7 @@ export function SpaTabMisReunionesAsignadas({ userId, role }: SpaTabMisReuniones
     return () => {
       window.clearInterval(intervalId);
     };
-  }, [canAutoSyncGoogleCalendar, userId]);
+  }, [userId]);
 
   const groupedMeetings = useMemo(() => {
     const groups: Record<string, MonthlyUpcomingGroup> = {};
@@ -446,15 +429,6 @@ export function SpaTabMisReunionesAsignadas({ userId, role }: SpaTabMisReuniones
             color="primary" 
             sx={{ fontWeight: 900, py: 2.5, px: 1, fontSize: "1rem", borderRadius: 3 }} 
           />
-          <Button
-            variant="contained"
-            color="secondary"
-            onClick={() => void runCalendarSync("manual")}
-            disabled={isCalendarSyncing || isLoading || meetings.length === 0 || !canAutoSyncGoogleCalendar}
-            sx={{ borderRadius: 2, fontWeight: 700, textTransform: "none" }}
-          >
-            {isCalendarSyncing ? "Sincronizando..." : "Sincronizar Google"}
-          </Button>
           <Button variant="outlined" onClick={() => void refresh()} disabled={isLoading} sx={{ borderRadius: 2, fontWeight: 700 }}>
             Actualizar
           </Button>
@@ -462,9 +436,9 @@ export function SpaTabMisReunionesAsignadas({ userId, role }: SpaTabMisReuniones
       </Stack>
 
       {error && <Alert severity="error" sx={{ mb: 3 }}>{error}</Alert>}
-      {!error && canAutoSyncGoogleCalendar && (
-        <Alert severity={calendarSyncError ? "warning" : "success"} sx={{ mb: 3 }}>
-          {calendarSyncError || calendarSyncMessage || "Sincronización automática con Google Calendar activa. Se actualiza al abrir esta pestaña y periódicamente cada 5 minutos."}
+      {!error && meetings.length > 0 && (
+        <Alert severity="info" sx={{ mb: 3 }}>
+          Cada reunión puede descargarse como archivo <strong>.ics</strong> para importarla en tu calendario preferido.
         </Alert>
       )}
 
@@ -707,15 +681,14 @@ export function SpaTabMisReunionesAsignadas({ userId, role }: SpaTabMisReuniones
                             fullWidth
                             variant="contained"
                             color="primary"
-                            startIcon={<GoogleIcon />}
-                            href={buildGoogleCalendarUrl(m)}
-                            target="_blank"
+                            startIcon={<DownloadRoundedIcon />}
+                            onClick={() => downloadMeetingIcs(m)}
                             sx={{ borderRadius: 3, fontWeight: 800, py: 1.5, textTransform: "none" }}
                           >
-                            Ver en Google Calendar
+                            Descargar ICS
                           </Button>
                           <Typography variant="caption" color="text.secondary" sx={{ textAlign: "center", fontWeight: 500 }}>
-                            Se sincroniza automáticamente. Usa este acceso para revisarla en Google.
+                            Importa este archivo en el calendario que prefieras.
                           </Typography>
                           
                           <Button

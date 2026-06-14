@@ -166,8 +166,7 @@ export async function GET() {
 
     return NextResponse.json({
       accounts,
-      hasPassword: Boolean(user?.passwordHash),
-      canUseGoogle: true
+      hasPassword: Boolean(user?.passwordHash)
     });
   } catch (error) {
     console.error("Error fetching accounts:", error);

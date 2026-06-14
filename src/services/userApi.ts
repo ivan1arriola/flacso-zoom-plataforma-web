@@ -127,7 +127,6 @@ export async function submitSendSelfActivationLinkTest(): Promise<{
 export async function loadGoogleAccountStatus(): Promise<{
   linked: boolean;
   hasPassword: boolean;
-  canUseGoogle: boolean;
   error?: string;
 }> {
   const response = await fetch("/api/v1/auth/accounts/google", { cache: "no-store" });
@@ -135,13 +134,11 @@ export async function loadGoogleAccountStatus(): Promise<{
     error?: string;
     accounts?: Array<{ provider: string }>;
     hasPassword?: boolean;
-    canUseGoogle?: boolean;
   };
   if (!response.ok) {
     return {
       linked: false,
       hasPassword: false,
-      canUseGoogle: false,
       error: data.error ?? "No se pudo obtener el estado de Google."
     };
   }
@@ -150,7 +147,6 @@ export async function loadGoogleAccountStatus(): Promise<{
   return {
     linked,
     hasPassword: Boolean(data.hasPassword),
-    canUseGoogle: Boolean(data.canUseGoogle),
     error: undefined
   };
 }
@@ -201,49 +197,6 @@ export async function syncProfileFromGoogle(): Promise<{
     success: true,
     user: data.user,
     message: data.message ?? "Perfil sincronizado con Google."
-  };
-}
-
-export async function syncUpcomingMeetingsToGoogleCalendar(): Promise<{
-  success: boolean;
-  total?: number;
-  created?: number;
-  updated?: number;
-  skipped?: number;
-  message?: string;
-  error?: string;
-}> {
-  const response = await fetch("/api/v1/google-calendar/upcoming/sync", {
-    method: "POST"
-  });
-
-  if (response.status === 204) {
-    return { success: true, total: 0, message: "Sin cambios." };
-  }
-
-  let data: any = {};
-  try {
-    data = await response.json();
-  } catch (e) {
-    console.error("Error parsing sync response:", e);
-    return {
-      success: false,
-      error: `Error en el servidor (${response.status}). Inténtalo de nuevo más tarde.`
-    };
-  }
-  if (!response.ok) {
-    return {
-      success: false,
-      error: data.error ?? "No se pudo sincronizar con Google Calendar."
-    };
-  }
-  return {
-    success: true,
-    total: data.total ?? 0,
-    created: data.created ?? 0,
-    updated: data.updated ?? 0,
-    skipped: data.skipped ?? 0,
-    message: data.message ?? "Sincronizacion completada."
   };
 }
 

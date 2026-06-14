@@ -918,7 +918,7 @@ export function InlineLogin({
           <Stack spacing={2}>
             <Typography variant="body2" color="text.secondary">
               Es la plataforma de FLACSO Uruguay para gestionar reuniones académicas en Zoom,
-              asistentes de soporte, notificaciones operativas y sincronización con Google Calendar.
+              asistentes de soporte y notificaciones operativas.
             </Typography>
             <Divider />
             <Box>
@@ -927,7 +927,7 @@ export function InlineLogin({
               </Typography>
               <Typography variant="body2" color="text.secondary">
                 Solicitamos acceso a tu perfil básico y correo únicamente para autenticar tu identidad 
-                y operar las funciones de gestión de salas y calendario autorizadas por el usuario.
+                y operar las funciones de gestión de salas autorizadas por el usuario.
               </Typography>
             </Box>
             <Box>
