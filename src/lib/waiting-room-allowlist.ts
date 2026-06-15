@@ -7,6 +7,10 @@ const WAITING_ROOM_ALLOWLIST_MARKER_START = "[WAITING_ROOM_ALLOWLIST]";
 const WAITING_ROOM_ALLOWLIST_MARKER_END = "[/WAITING_ROOM_ALLOWLIST]";
 const SIMPLE_EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/i;
 
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
 function normalizeText(value: unknown): string {
   return typeof value === "string" ? value.trim() : "";
 }
@@ -122,10 +126,9 @@ export function parseWaitingRoomAllowlistText(raw: string): {
 function stripWaitingRoomAllowlistBlock(raw?: string | null): string {
   const source = normalizeText(raw);
   if (!source) return "";
-  const markerPattern = new RegExp(
-    `${WAITING_ROOM_ALLOWLIST_MARKER_START}[\\s\\S]*?${WAITING_ROOM_ALLOWLIST_MARKER_END}`,
-    "g"
-  );
+  const markerStart = escapeRegExp(WAITING_ROOM_ALLOWLIST_MARKER_START);
+  const markerEnd = escapeRegExp(WAITING_ROOM_ALLOWLIST_MARKER_END);
+  const markerPattern = new RegExp(`${markerStart}[\\s\\S]*?${markerEnd}`, "g");
   return source.replace(markerPattern, "").trim();
 }
 
@@ -133,9 +136,9 @@ export function extractWaitingRoomAllowlistFromMotivo(raw?: string | null): Wait
   const source = normalizeText(raw);
   if (!source) return [];
 
-  const markerPattern = new RegExp(
-    `${WAITING_ROOM_ALLOWLIST_MARKER_START}([\\s\\S]*?)${WAITING_ROOM_ALLOWLIST_MARKER_END}`
-  );
+  const markerStart = escapeRegExp(WAITING_ROOM_ALLOWLIST_MARKER_START);
+  const markerEnd = escapeRegExp(WAITING_ROOM_ALLOWLIST_MARKER_END);
+  const markerPattern = new RegExp(`${markerStart}([\\s\\S]*?)${markerEnd}`);
   const match = source.match(markerPattern);
   if (!match?.[1]) return [];
 

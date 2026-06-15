@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   dbEventoZoomFindUnique: vi.fn(),
@@ -61,7 +61,14 @@ describe("SalasLegacyService.updateUpcomingEvent - specific occurrence update", 
     vi.clearAllMocks();
   });
 
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   it("extracts target occurrence and updates the specific instance in Zoom", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-06-14T00:00:00Z"));
+
     // Mock the DB event
     mocks.dbEventoZoomFindUnique.mockResolvedValue({
       id: "evt-master",

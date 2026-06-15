@@ -1,25 +1,35 @@
-import { describe, it, expect, beforeAll } from "vitest";
+import { describe, it, expect } from "vitest";
 import { google } from "googleapis";
 import dotenv from "dotenv";
 import path from "path";
 
-// Cargar variables de entorno antes de los tests
-beforeAll(() => {
-  dotenv.config({ path: path.resolve(__dirname, "../.env") });
+dotenv.config({ path: path.resolve(__dirname, "../.env") });
+
+const getCredentials = () => ({
+  email: process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL,
+  key: (process.env.GOOGLE_PRIVATE_KEY || "").replace(/\\n/g, "\n"),
+  subject: process.env.GOOGLE_SERVICE_ACCOUNT_SUBJECT,
 });
 
-describe("Google Authentication & Permissions", () => {
-  const getCredentials = () => ({
-    email: process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL,
-    key: (process.env.GOOGLE_PRIVATE_KEY || "").replace(/\\n/g, "\n"),
-    subject: process.env.GOOGLE_SERVICE_ACCOUNT_SUBJECT,
-  });
+const hasGoogleIntegrationEnv = () => {
+  const { email, key, subject } = getCredentials();
+  return Boolean(
+    email &&
+    key.includes("BEGIN PRIVATE KEY") &&
+    subject?.endsWith("@flacso.edu.uy") &&
+    process.env.DRIVE_DESTINATION_ID
+  );
+};
 
+const describeGoogleIntegration = hasGoogleIntegrationEnv() ? describe : describe.skip;
+
+describeGoogleIntegration("Google Authentication & Permissions (integration)", () => {
   it("should have all required environment variables", () => {
     const { email, key, subject } = getCredentials();
     expect(email).toBeDefined();
     expect(key).toContain("BEGIN PRIVATE KEY");
     expect(subject).toMatch(/@flacso.edu.uy$/);
+    expect(process.env.DRIVE_DESTINATION_ID).toBeDefined();
   });
 
   it("should successfully authorize with Domain-Wide Delegation", async () => {
@@ -48,15 +58,14 @@ describe("Google Authentication & Permissions", () => {
     });
 
     const drive = google.drive({ version: "v3", auth });
-    const res = await drive.files.get({ 
-        fileId: folderId, 
-        fields: "id, name",
-        supportsAllDrives: true 
+    const res = await drive.files.get({
+      fileId: folderId,
+      fields: "id, name",
+      supportsAllDrives: true,
     });
 
     expect(res.data.id).toBe(folderId);
     expect(res.data.name).toBeDefined();
-    console.log(`✅ Drive Destination: ${res.data.name}`);
   });
 
   it("should have permission to send emails via Gmail", async () => {

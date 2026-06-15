@@ -9975,8 +9975,20 @@ export class SalasLegacyService {
     if (!event) throw new Error("Evento no encontrado.");
     const canManageAsAdmin = user.role === UserRole.ADMINISTRADOR;
     const now = new Date();
+    const hasTargetPreviousStart =
+      typeof input.targetPreviousStart === "string" && input.targetPreviousStart.trim().length > 0;
+    const baseDurationMs = Math.max(
+      60_000,
+      event.finProgramadoAt.getTime() - event.inicioProgramadoAt.getTime()
+    );
+    const previousStart = hasTargetPreviousStart
+      ? toDate(input.targetPreviousStart as string, "targetPreviousStart")
+      : event.inicioProgramadoAt;
+    const previousEnd = hasTargetPreviousStart
+      ? new Date(previousStart.getTime() + baseDurationMs)
+      : event.finProgramadoAt;
     const isPastOrClosedEvent =
-      event.finProgramadoAt <= now ||
+      previousEnd <= now ||
       event.estadoEvento === EstadoEventoZoom.FINALIZADO ||
       event.estadoEvento === EstadoEventoZoom.CANCELADO;
     if (!canManageAsAdmin) {
@@ -10002,8 +10014,6 @@ export class SalasLegacyService {
     const previousResponsible = event.solicitud.responsableNombre ?? "";
     const previousDescription = event.solicitud.descripcion ?? "";
     const previousTimezone = event.timezone || event.solicitud.timezone || "America/Montevideo";
-    const previousStart = input.targetPreviousStart ? new Date(input.targetPreviousStart) : event.inicioProgramadoAt;
-    const previousEnd = event.finProgramadoAt;
 
     const hasStartInput = typeof input.inicioProgramadoAt === "string" && input.inicioProgramadoAt.trim().length > 0;
     const hasEndInput = typeof input.finProgramadoAt === "string" && input.finProgramadoAt.trim().length > 0;

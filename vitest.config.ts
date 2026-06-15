@@ -8,6 +8,9 @@ export default defineConfig({
     }
   },
   test: {
-    environment: "node"
+    environment: "node",
+    include: ["test/**/*.test.ts"],
+    exclude: ["node_modules", ".next", "dist", "build"],
+    clearMocks: true
   }
 });
