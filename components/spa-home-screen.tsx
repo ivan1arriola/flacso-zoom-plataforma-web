@@ -1,5 +1,6 @@
 "use client";
 
+import dynamic from "next/dynamic";
 import { type ComponentProps, useEffect, useMemo, useRef, useState } from "react";
 import { Box } from "@mui/material";
 import {
@@ -36,30 +37,8 @@ import { useDashboard } from "@/src/hooks/useDashboard";
 import { useUIState } from "@/src/hooks/useUIState";
 import { useZoomUpcomingMeetings } from "@/src/hooks/useZoomUpcomingMeetings";
 import { useZoomPastMeetings } from "@/src/hooks/useZoomPastMeetings";
-import { SpaTabDashboard } from "@/components/spa-tabs/SpaTabDashboard";
-import { SpaTabSolicitudes } from "@/components/spa-tabs/SpaTabSolicitudes";
-import { SpaTabProgramas } from "@/components/spa-tabs/SpaTabProgramas";
-import { SpaTabAgendaLibre } from "@/components/spa-tabs/SpaTabAgendaLibre";
-import { SpaTabMisReunionesAsignadas } from "@/components/spa-tabs/SpaTabMisReunionesAsignadas";
-import { SpaTabMisAsistencias } from "@/components/spa-tabs/SpaTabMisAsistencias";
-import { SpaTabHistoricoAsistencias } from "@/components/spa-tabs/SpaTabHistoricoAsistencias";
-import { SpaTabAsignacion } from "@/components/spa-tabs/SpaTabAsignacion";
-import {
-  SpaTabManual,
-  type ManualResolutionInput
-} from "@/components/spa-tabs/SpaTabManual";
-import { SpaTabHistorico } from "@/components/spa-tabs/SpaTabHistorico";
-import { SpaTabTarifas } from "@/components/spa-tabs/SpaTabTarifas";
-import { SpaTabGestionAsistentes } from "@/components/spa-tabs/SpaTabGestionAsistentes";
-import { SpaTabCuentas } from "@/components/spa-tabs/SpaTabCuentas";
-import { SpaTabProximasReuniones } from "@/components/spa-tabs/SpaTabProximasReuniones";
-import { SpaTabPasadasReunionesZoom } from "@/components/spa-tabs/SpaTabPasadasReunionesZoom";
-import { SpaTabUsuarios } from "@/components/spa-tabs/SpaTabUsuarios";
-import { SpaTabLogins } from "@/components/spa-tabs/SpaTabLogins";
-import { SpaTabPerfil } from "@/components/spa-tabs/SpaTabPerfil";
-import { SpaTabEstadisticas } from "@/components/spa-tabs/SpaTabEstadisticas";
-import { SpaTabAgendaAdmin } from "@/components/spa-tabs/SpaTabAgendaAdmin";
-import { SpaTabNotificaciones } from "@/components/SpaTabNotificaciones";
+import type { SpaTabSolicitudes as SpaTabSolicitudesComponent } from "@/components/spa-tabs/SpaTabSolicitudes";
+import type { ManualResolutionInput } from "@/components/spa-tabs/SpaTabManual";
 import { SpaBusyOverlay } from "@/components/spa-home/SpaBusyOverlay";
 import { SpaSnackbar } from "@/components/spa-home/SpaSnackbar";
 import { useSpaBusyState } from "@/src/hooks/useSpaBusyState";
@@ -85,8 +64,99 @@ import {
 
 export type { CurrentUser } from "@/src/lib/spa-home/client-types";
 
+function TabLoadingFallback() {
+  return (
+    <Box sx={{ py: 4, color: "text.secondary", fontWeight: 600 }}>
+      Cargando seccion...
+    </Box>
+  );
+}
+
+const SpaTabDashboard = dynamic(
+  () => import("@/components/spa-tabs/SpaTabDashboard").then((module) => module.SpaTabDashboard),
+  { loading: TabLoadingFallback }
+);
+const SpaTabSolicitudes = dynamic(
+  () => import("@/components/spa-tabs/SpaTabSolicitudes").then((module) => module.SpaTabSolicitudes),
+  { loading: TabLoadingFallback }
+);
+const SpaTabProgramas = dynamic(
+  () => import("@/components/spa-tabs/SpaTabProgramas").then((module) => module.SpaTabProgramas),
+  { loading: TabLoadingFallback }
+);
+const SpaTabAgendaLibre = dynamic(
+  () => import("@/components/spa-tabs/SpaTabAgendaLibre").then((module) => module.SpaTabAgendaLibre),
+  { loading: TabLoadingFallback }
+);
+const SpaTabMisReunionesAsignadas = dynamic(
+  () => import("@/components/spa-tabs/SpaTabMisReunionesAsignadas").then((module) => module.SpaTabMisReunionesAsignadas),
+  { loading: TabLoadingFallback }
+);
+const SpaTabMisAsistencias = dynamic(
+  () => import("@/components/spa-tabs/SpaTabMisAsistencias").then((module) => module.SpaTabMisAsistencias),
+  { loading: TabLoadingFallback }
+);
+const SpaTabHistoricoAsistencias = dynamic(
+  () => import("@/components/spa-tabs/SpaTabHistoricoAsistencias").then((module) => module.SpaTabHistoricoAsistencias),
+  { loading: TabLoadingFallback }
+);
+const SpaTabManual = dynamic(
+  () => import("@/components/spa-tabs/SpaTabManual").then((module) => module.SpaTabManual),
+  { loading: TabLoadingFallback }
+);
+const SpaTabHistorico = dynamic(
+  () => import("@/components/spa-tabs/SpaTabHistorico").then((module) => module.SpaTabHistorico),
+  { loading: TabLoadingFallback }
+);
+const SpaTabTarifas = dynamic(
+  () => import("@/components/spa-tabs/SpaTabTarifas").then((module) => module.SpaTabTarifas),
+  { loading: TabLoadingFallback }
+);
+const SpaTabGestionAsistentes = dynamic(
+  () => import("@/components/spa-tabs/SpaTabGestionAsistentes").then((module) => module.SpaTabGestionAsistentes),
+  { loading: TabLoadingFallback }
+);
+const SpaTabCuentas = dynamic(
+  () => import("@/components/spa-tabs/SpaTabCuentas").then((module) => module.SpaTabCuentas),
+  { loading: TabLoadingFallback }
+);
+const SpaTabProximasReuniones = dynamic(
+  () => import("@/components/spa-tabs/SpaTabProximasReuniones").then((module) => module.SpaTabProximasReuniones),
+  { loading: TabLoadingFallback }
+);
+const SpaTabPasadasReunionesZoom = dynamic(
+  () => import("@/components/spa-tabs/SpaTabPasadasReunionesZoom").then((module) => module.SpaTabPasadasReunionesZoom),
+  { loading: TabLoadingFallback }
+);
+const SpaTabUsuarios = dynamic(
+  () => import("@/components/spa-tabs/SpaTabUsuarios").then((module) => module.SpaTabUsuarios),
+  { loading: TabLoadingFallback }
+);
+const SpaTabLogins = dynamic(
+  () => import("@/components/spa-tabs/SpaTabLogins").then((module) => module.SpaTabLogins),
+  { loading: TabLoadingFallback }
+);
+const SpaTabPerfil = dynamic(
+  () => import("@/components/spa-tabs/SpaTabPerfil").then((module) => module.SpaTabPerfil),
+  { loading: TabLoadingFallback }
+);
+const SpaTabEstadisticas = dynamic(
+  () => import("@/components/spa-tabs/SpaTabEstadisticas").then((module) => module.SpaTabEstadisticas),
+  { loading: TabLoadingFallback }
+);
+const SpaTabAgendaAdmin = dynamic(
+  () => import("@/components/spa-tabs/SpaTabAgendaAdmin").then((module) => module.SpaTabAgendaAdmin),
+  { loading: TabLoadingFallback }
+);
+const SpaTabNotificaciones = dynamic(
+  () => import("@/components/SpaTabNotificaciones").then((module) => module.SpaTabNotificaciones),
+  { loading: TabLoadingFallback }
+);
+
 export function SpaHomeScreen() {
   const hasBootstrappedRef = useRef(false);
+  const loadedResourceKeysRef = useRef<Set<string>>(new Set());
+  const loadingResourcePromisesRef = useRef<Record<string, Promise<void>>>({});
   const [programas, setProgramas] = useState<Programa[]>([]);
   const [isCreatingPrograma, setIsCreatingPrograma] = useState(false);
   const [isRefreshingProgramas, setIsRefreshingProgramas] = useState(false);
@@ -463,6 +533,155 @@ export function SpaHomeScreen() {
     updatingAsistenciaInstanciaKey
   });
 
+  async function loadResourceOnce(key: string, loader: () => Promise<void>) {
+    if (loadedResourceKeysRef.current.has(key)) return;
+
+    const pending = loadingResourcePromisesRef.current[key];
+    if (pending) {
+      await pending;
+      return;
+    }
+
+    const promise = (async () => {
+      try {
+        await loader();
+        loadedResourceKeysRef.current.add(key);
+      } catch (error) {
+        const detail = error instanceof Error ? error.message : "Error desconocido.";
+        setMessage(`No se pudo cargar la informacion de esta seccion. ${detail}`);
+      }
+    })();
+
+    loadingResourcePromisesRef.current[key] = promise;
+    try {
+      await promise;
+    } finally {
+      delete loadingResourcePromisesRef.current[key];
+    }
+  }
+
+  function applyAssignmentBoard(data: Awaited<ReturnType<typeof loadAssignmentBoard>>) {
+    if (!data) return;
+    setAssignmentBoardEvents(data.events ?? []);
+    setAssignableAssistants(data.assistants ?? []);
+    setSelectedAssistantByEvent((prev) => {
+      const next = { ...prev };
+      for (const event of data.events ?? []) {
+        if (!next[event.id]) {
+          next[event.id] =
+            event.currentAssignment?.asistenteZoomId ??
+            event.interesados[0]?.asistenteZoomId ??
+            "";
+        }
+      }
+      return next;
+    });
+  }
+
+  async function loadSummaryData(options?: {
+    force?: boolean;
+    role?: ViewRole | "";
+    targetTab?: string;
+  }) {
+    const role = options?.role ?? effectiveRole;
+    const targetTab = options?.targetTab ?? tab;
+    const key = `summary:${role || "sin-rol"}:${targetTab}`;
+    const loader = async () => {
+      setIsLoadingSummary(true);
+      try {
+        const data = await loadSummary(buildSummaryLoadOptions(role, targetTab));
+        if (data) setSummary(data);
+      } finally {
+        setIsLoadingSummary(false);
+      }
+    };
+
+    if (options?.force) {
+      loadedResourceKeysRef.current.delete(key);
+      await loader();
+      loadedResourceKeysRef.current.add(key);
+      return;
+    }
+
+    await loadResourceOnce(key, loader);
+  }
+
+  async function loadSolicitudesOnce() {
+    await loadResourceOnce("solicitudes", async () => {
+      setIsLoadingSolicitudes(true);
+      try {
+        const data = await loadSolicitudes();
+        if (data) setSolicitudes(data);
+      } finally {
+        setIsLoadingSolicitudes(false);
+      }
+    });
+  }
+
+  async function loadProgramasOnce() {
+    await loadResourceOnce("programas", async () => {
+      const data = await loadProgramas();
+      if (data) setProgramas(data);
+    });
+  }
+
+  async function loadTarifasOnce() {
+    await loadResourceOnce("tarifas", async () => {
+      const data = await loadTarifas();
+      if (data) setTarifas(data);
+    });
+  }
+
+  async function loadUsersOnce() {
+    await loadResourceOnce("users", async () => {
+      setIsLoadingUsers(true);
+      try {
+        const data = await loadUsers();
+        if (data) setUsers(data);
+      } finally {
+        setIsLoadingUsers(false);
+      }
+    });
+  }
+
+  async function loadManualPendingsOnce() {
+    await loadResourceOnce("manual-pendings", async () => {
+      const data = await loadManualPendings();
+      if (data) setManualPendings(data);
+    });
+  }
+
+  async function loadAgendaLibreOnce() {
+    await loadResourceOnce("agenda-libre", async () => {
+      setIsLoadingAgendaLibre(true);
+      try {
+        const data = await loadAgendaLibre();
+        if (data) setAgendaLibre(data);
+        setHasLoadedAgendaLibre(true);
+      } finally {
+        setIsLoadingAgendaLibre(false);
+      }
+    });
+  }
+
+  async function loadAssignmentBoardOnce() {
+    await loadResourceOnce("assignment-board", async () => {
+      setIsLoadingAssignmentBoard(true);
+      try {
+        const data = await loadAssignmentBoard();
+        applyAssignmentBoard(data);
+      } finally {
+        setIsLoadingAssignmentBoard(false);
+      }
+    });
+  }
+
+  async function loadPastMeetingsOnce() {
+    await loadResourceOnce("past-meetings", async () => {
+      await refreshPastMeetings();
+    });
+  }
+
   useEffect(() => {
     void bootstrap();
   }, []);
@@ -482,101 +701,14 @@ export function SpaHomeScreen() {
         lastName: meJson.user.lastName ?? "",
         image: meJson.user.image ?? ""
       });
+
       const presentationRole = resolveEffectiveRoleForUser(meJson.user.role);
       const initialTab = requestedTab ?? getDefaultTabForRole(presentationRole || "ADMINISTRADOR");
-      if (!requestedTab) {
-        setTab(initialTab);
+      setTab(initialTab);
+
+      if (initialTab === "dashboard") {
+        await loadSummaryData({ role: presentationRole, targetTab: initialTab });
       }
-
-      const loaders: Array<Promise<void>> = [
-        (async () => {
-          const summary = await loadSummary(buildSummaryLoadOptions(presentationRole, initialTab));
-          if (summary) setSummary(summary);
-        })()
-      ];
-
-      if (presentationRole === "ADMINISTRADOR") {
-        loaders.push(
-          (async () => {
-            const pendings = await loadManualPendings();
-            if (pendings) setManualPendings(pendings);
-          })()
-        );
-      }
-
-      if (["ADMINISTRADOR", "CONTADURIA"].includes(presentationRole)) {
-        loaders.push(
-          (async () => {
-            const tarifas = await loadTarifas();
-            if (tarifas) setTarifas(tarifas);
-          })()
-        );
-      }
-
-      if (["DOCENTE", "ADMINISTRADOR"].includes(presentationRole)) {
-        loaders.push(
-          (async () => {
-            const loadedProgramas = await loadProgramas();
-            if (loadedProgramas) setProgramas(loadedProgramas);
-          })()
-        );
-      }
-
-      if (["DOCENTE", "ADMINISTRADOR"].includes(presentationRole)) {
-        loaders.push(
-          (async () => {
-            setIsLoadingSolicitudes(true);
-            try {
-              const solicitudes = await loadSolicitudes();
-              if (solicitudes) setSolicitudes(solicitudes);
-            } finally {
-              setIsLoadingSolicitudes(false);
-            }
-          })()
-        );
-      }
-
-      if (presentationRole === "ADMINISTRADOR") {
-        loaders.push(
-          (async () => {
-            const data = await loadAssignmentBoard();
-            if (data) {
-              setAssignmentBoardEvents(data.events ?? []);
-              setAssignableAssistants(data.assistants ?? []);
-              setSelectedAssistantByEvent((prev) => {
-                const next = { ...prev };
-                for (const event of data.events ?? []) {
-                  if (!next[event.id]) {
-                    next[event.id] =
-                      event.currentAssignment?.asistenteZoomId ??
-                      event.interesados[0]?.asistenteZoomId ??
-                      "";
-                  }
-                }
-                return next;
-              });
-            }
-          })()
-        );
-        loaders.push(
-          (async () => {
-            const users = await loadUsers();
-            if (users) setUsers(users);
-          })()
-        );
-      }
-
-      if (presentationRole === "ASISTENTE_ZOOM") {
-        loaders.push(
-          (async () => {
-            const agenda = await loadAgendaLibre();
-            if (agenda) setAgendaLibre(agenda);
-            setHasLoadedAgendaLibre(true);
-          })()
-        );
-      }
-
-      await Promise.all(loaders);
     } finally {
       hasBootstrappedRef.current = true;
       setLoading(false);
@@ -633,6 +765,36 @@ export function SpaHomeScreen() {
   }, [docenteLinkedEmailOptions, setForm]);
 
   useEffect(() => {
+    if (!hasBootstrappedRef.current) return;
+    if (tab !== "dashboard") return;
+    void loadSummaryData();
+    if (effectiveRole === "ASISTENTE_ZOOM" && canSeeAgendaLibre) {
+      void loadAgendaLibreOnce();
+    }
+  }, [tab, effectiveRole, canSeeAgendaLibre]);
+
+  useEffect(() => {
+    if (!hasBootstrappedRef.current) return;
+
+    if ((tab === "crear_reunion" || tab === "solicitudes") && canSeeSolicitudes) {
+      void loadSolicitudesOnce();
+      void loadProgramasOnce();
+      if (effectiveRole === "ADMINISTRADOR") {
+        void loadUsersOnce();
+      }
+    }
+
+    if (tab === "agenda_admin" && canSeeAgendaAdmin) {
+      void loadSolicitudesOnce();
+    }
+
+    if (tab === "programas" && canSeeProgramas) {
+      void loadProgramasOnce();
+      void loadSolicitudesOnce();
+    }
+  }, [tab, canSeeSolicitudes, canSeeAgendaAdmin, canSeeProgramas, effectiveRole]);
+
+  useEffect(() => {
     if (tab !== "perfil" || !user) return;
     (async () => {
       setIsLoadingGoogleStatus(true);
@@ -652,6 +814,11 @@ export function SpaHomeScreen() {
   }, [tab, canSeeZoomAccounts]);
 
   useEffect(() => {
+    if (tab !== "manual" || !canSeeManual) return;
+    void loadManualPendingsOnce();
+  }, [tab, canSeeManual]);
+
+  useEffect(() => {
     if (tab !== "proximas_zoom" || !canSeeZoomAccounts) return;
     void refreshZoomUpcomingMeetings();
   }, [tab, canSeeZoomAccounts]);
@@ -662,55 +829,29 @@ export function SpaHomeScreen() {
   }, [tab, canSeeZoomAccounts, selectedZoomPastMonthsBack]);
 
   useEffect(() => {
-    if (tab !== "usuarios" || !canSeeUsers) return;
-    void refreshUsers();
-  }, [tab, canSeeUsers]);
+    if ((tab === "usuarios" && canSeeUsers) || (tab === "logins" && canSeeLogins)) {
+      void loadUsersOnce();
+    }
+  }, [tab, canSeeUsers, canSeeLogins]);
 
   useEffect(() => {
-      if (tab !== "agenda_libre" || !canSeeAgendaLibre) return;
-      (async () => {
-        setIsLoadingAgendaLibre(true);
-        try {
-          const agenda = await loadAgendaLibre();
-          if (agenda) setAgendaLibre(agenda);
-          setHasLoadedAgendaLibre(true);
-        } finally {
-          setIsLoadingAgendaLibre(false);
-        }
-      })();
-  }, [tab, canSeeAgendaLibre, setHasLoadedAgendaLibre]);
+    if (tab !== "agenda_libre" || !canSeeAgendaLibre) return;
+    void loadAgendaLibreOnce();
+  }, [tab, canSeeAgendaLibre]);
 
   useEffect(() => {
     if (tab !== "asistentes_asignacion" || !canSeeAsistentesAsignacion) return;
-    (async () => {
-      setIsLoadingAssignmentBoard(true);
-      try {
-        const data = await loadAssignmentBoard();
-        if (data) {
-          setAssignmentBoardEvents(data.events ?? []);
-          setAssignableAssistants(data.assistants ?? []);
-          setSelectedAssistantByEvent((prev) => {
-            const next = { ...prev };
-            for (const event of data.events ?? []) {
-              if (!next[event.id]) {
-                next[event.id] =
-                  event.currentAssignment?.asistenteZoomId ??
-                  event.interesados[0]?.asistenteZoomId ??
-                  "";
-              }
-            }
-            return next;
-          });
-        }
-      } finally {
-        setIsLoadingAssignmentBoard(false);
-      }
-    })();
+    void loadAssignmentBoardOnce();
   }, [tab, canSeeAsistentesAsignacion]);
 
   useEffect(() => {
+    if (tab !== "tarifas" || !canSeeTarifas) return;
+    void loadTarifasOnce();
+  }, [tab, canSeeTarifas]);
+
+  useEffect(() => {
     if (tab !== "historico" || !canSeePastMeetings) return;
-    void refreshPastMeetings();
+    void loadPastMeetingsOnce();
   }, [tab, canSeePastMeetings]);
 
   useEffect(() => {
@@ -718,20 +859,8 @@ export function SpaHomeScreen() {
     setTab(requestedTab);
   }, [requestedTab]);
 
-  useEffect(() => {
-    if (!hasBootstrappedRef.current) return;
-    if (tab !== "dashboard") return;
-    void refreshSummary();
-  }, [tab, effectiveRole]);
-
   async function refreshSummary() {
-    setIsLoadingSummary(true);
-    try {
-      const data = await loadSummary(buildSummaryLoadOptions());
-      if (data) setSummary(data);
-    } finally {
-      setIsLoadingSummary(false);
-    }
+    await loadSummaryData({ force: true });
   }
 
   async function refreshManualPendings() {
@@ -741,28 +870,53 @@ export function SpaHomeScreen() {
       return;
     }
     setManualPendings(pendings);
+    loadedResourceKeysRef.current.add("manual-pendings");
   }
 
   async function refreshAfterSolicitudMutation() {
     setIsLoadingSolicitudes(true);
     try {
-      const [summaryData, solicitudesData, agendaData, assignmentData, manualData] = await Promise.all([
-        loadSummary(buildSummaryLoadOptions()),
-        loadSolicitudes(),
-        loadAgendaLibre(),
-        loadAssignmentBoard(),
-        loadManualPendings()
-      ]);
+      const refreshes: Array<Promise<void>> = [
+        (async () => {
+          const summaryData = await loadSummary(buildSummaryLoadOptions());
+          if (summaryData) setSummary(summaryData);
+        })(),
+        (async () => {
+          const solicitudesData = await loadSolicitudes();
+          if (solicitudesData) setSolicitudes(solicitudesData);
+        })()
+      ];
 
-      if (summaryData) setSummary(summaryData);
-      if (solicitudesData) setSolicitudes(solicitudesData);
-      if (agendaData) setAgendaLibre(agendaData);
-      setHasLoadedAgendaLibre(true);
-      if (assignmentData) {
-        setAssignmentBoardEvents(assignmentData.events ?? []);
-        setAssignableAssistants(assignmentData.assistants ?? []);
+      if (canSeeAgendaLibre || loadedResourceKeysRef.current.has("agenda-libre")) {
+        refreshes.push(
+          (async () => {
+            const agendaData = await loadAgendaLibre();
+            if (agendaData) setAgendaLibre(agendaData);
+            setHasLoadedAgendaLibre(true);
+          })()
+        );
       }
-      if (manualData) setManualPendings(manualData);
+
+      if (canSeeAsistentesAsignacion || loadedResourceKeysRef.current.has("assignment-board")) {
+        refreshes.push(
+          (async () => {
+            const assignmentData = await loadAssignmentBoard();
+            applyAssignmentBoard(assignmentData);
+          })()
+        );
+      }
+
+      if (canSeeManual || loadedResourceKeysRef.current.has("manual-pendings")) {
+        refreshes.push(
+          (async () => {
+            const manualData = await loadManualPendings();
+            if (manualData) setManualPendings(manualData);
+          })()
+        );
+      }
+
+      await Promise.all(refreshes);
+      loadedResourceKeysRef.current.add("solicitudes");
     } finally {
       setIsLoadingSolicitudes(false);
     }
@@ -803,7 +957,7 @@ export function SpaHomeScreen() {
   }
 
   const solicitudesTabProps: Omit<
-    ComponentProps<typeof SpaTabSolicitudes>,
+    ComponentProps<typeof SpaTabSolicitudesComponent>,
     "docenteSolicitudesView" | "setDocenteSolicitudesView"
   > = {
     solicitudes,

@@ -49,4 +49,4 @@ solicitudes-salas-zoom/
 
 vendor-chunks/
 *.zip
-test-suite-mejorada.patch
+*.patch

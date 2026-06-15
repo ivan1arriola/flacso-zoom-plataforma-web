@@ -100,6 +100,8 @@ export function SpaTabGestionAsistentes(props: SpaTabGestionAsistentesProps) {
   }, [people]);
 
   useEffect(() => {
+    if (activeSubTab === 0 || people.length > 0) return;
+
     (async () => {
       setIsLoadingList(true);
       try {
@@ -117,7 +119,7 @@ export function SpaTabGestionAsistentes(props: SpaTabGestionAsistentesProps) {
         setIsLoadingList(false);
       }
     })();
-  }, []);
+  }, [activeSubTab, people.length, selectedUserId]);
 
   useEffect(() => {
     if (!selectedUserId) return;

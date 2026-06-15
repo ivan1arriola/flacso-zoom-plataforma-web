@@ -100,6 +100,24 @@ async function showBrowserNotification(item: NavbarNotificationItem): Promise<vo
   });
 }
 
+type IdleCapableWindow = Window & {
+  requestIdleCallback?: (callback: () => void, options?: { timeout: number }) => number;
+  cancelIdleCallback?: (handle: number) => void;
+};
+
+function scheduleIdleWork(callback: () => void, timeoutMs = 1500): () => void {
+  if (typeof window === "undefined") return () => {};
+
+  const idleWindow = window as IdleCapableWindow;
+  if (idleWindow.requestIdleCallback) {
+    const handle = idleWindow.requestIdleCallback(callback, { timeout: timeoutMs });
+    return () => idleWindow.cancelIdleCallback?.(handle);
+  }
+
+  const handle = window.setTimeout(callback, timeoutMs);
+  return () => window.clearTimeout(handle);
+}
+
 function resolveTabFromSearchParams(searchParams: URLSearchParams): Tab {
   const rawTab = (searchParams.get("tab") ?? "").toLowerCase();
   if (!rawTab) return "dashboard";
@@ -228,13 +246,14 @@ export function LayoutNavbar({ user }: LayoutNavbarProps) {
   }, []);
 
   useEffect(() => {
-    void refreshUnreadNotifications();
-  }, [refreshUnreadNotifications]);
-
-  useEffect(() => {
     if (currentTab === "notificaciones") {
       void refreshUnreadNotifications();
+      return;
     }
+
+    return scheduleIdleWork(() => {
+      void refreshUnreadNotifications();
+    });
   }, [currentTab, refreshUnreadNotifications]);
 
   useEffect(() => {
