@@ -17,6 +17,16 @@ export type PushPayload = {
   tag?: string;
 };
 
+function describePushEndpoint(endpoint: string): string {
+  try {
+    const parsed = new URL(endpoint);
+    const tokenTail = parsed.pathname.split("/").pop()?.slice(-12) ?? "desconocido";
+    return `${parsed.origin}/...${tokenTail}`;
+  } catch {
+    return endpoint.slice(0, 48);
+  }
+}
+
 function isExpiredPushSubscriptionError(error: unknown): boolean {
   if (!error || typeof error !== "object") return false;
   const statusCode = (error as { statusCode?: unknown }).statusCode;
@@ -46,11 +56,18 @@ export async function sendPushNotification(
     );
     return { success: true };
   } catch (error) {
-    console.error("Error enviando notificacion push:", error);
     if (isExpiredPushSubscriptionError(error)) {
-      // Subscripcion expirada o invalida
+      const statusCode =
+        typeof (error as { statusCode?: unknown }).statusCode === "number"
+          ? (error as { statusCode: number }).statusCode
+          : "desconocido";
+      console.warn("Suscripcion push expirada o invalida; se eliminara del registro.", {
+        statusCode,
+        endpoint: describePushEndpoint(subscription.endpoint)
+      });
       return { success: false, expired: true };
     }
+    console.error("Error enviando notificacion push:", error);
     return { success: false, error: error instanceof Error ? error.message : String(error) };
   }
 }
@@ -93,7 +110,13 @@ export async function sendPushToUser(userId: string, payload: PushPayload) {
       );
 
       if (result.expired) {
-        await db.pushSubscription.delete({ where: { id: sub.id } }).catch(() => {});
+        await db.pushSubscription.delete({ where: { id: sub.id } }).catch((error) => {
+          console.error("No se pudo eliminar una suscripcion push expirada.", {
+            subscriptionId: sub.id,
+            endpoint: describePushEndpoint(sub.endpoint),
+            error: error instanceof Error ? error.message : String(error)
+          });
+        });
       }
 
       return result.success;
