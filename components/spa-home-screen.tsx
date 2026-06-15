@@ -1,76 +1,29 @@
 "use client";
 
-import { type ComponentProps, type FormEvent, useEffect, useMemo, useRef, useState } from "react";
-import { signIn } from "next-auth/react";
+import { type ComponentProps, useEffect, useMemo, useRef, useState } from "react";
 import { Box } from "@mui/material";
-import {
-  formatDateTime
-} from "@/src/lib/spa-home/recurrence";
 import {
   canAccessTabForRole,
   getDefaultTabForRole,
-  normalizeAssistantRole,
   resolveEffectiveRoleForUser,
   type ViewRole
 } from "@/src/lib/spa-home/navigation";
-import { normalizeDocentesCorreosByLine } from "@/src/lib/spa-home/validation";
 import {
   loadSummary,
-  loadAssignmentBoard,
-  loadAssignmentSuggestion,
-  loadNextAssignmentSuggestion
+  loadAssignmentBoard
 } from "@/src/services/dashboardApi";
+import { loadSolicitudes } from "@/src/services/solicitudesApi";
 import {
-  loadPastMeetings,
-  loadSolicitudes,
-  submitDocenteSolicitud as submitDocenteSolicitudApi,
-  deleteSolicitud as deleteSolicitudApi,
-  cancelSolicitudSerie as cancelSolicitudSerieApi,
-  cancelSolicitudInstancia as cancelSolicitudInstanciaApi,
-  restoreSolicitudInstancia as restoreSolicitudInstanciaApi,
-  addSolicitudInstancia as addSolicitudInstanciaApi,
-  submitPastMeeting as submitPastMeetingApi,
-  sendSolicitudReminder as sendSolicitudReminderApi,
-  updatePastMeeting as updatePastMeetingApi,
-  enableSolicitudAsistencia as enableSolicitudAsistenciaApi,
-  updateSolicitudInstanciaAsistencia as updateSolicitudInstanciaAsistenciaApi,
-  reassignRecurringSolicitudResponsable as reassignRecurringSolicitudResponsableApi
-} from "@/src/services/solicitudesApi";
-import {
-  createPrograma as createProgramaApi,
   loadProgramas,
   type Programa
 } from "@/src/services/programasApi";
-import {
-  loadAgendaLibre,
-  setInterest as setInterestApi,
-  assignAssistantToEvent as assignAssistantToEventApi,
-  unassignAssistantFromEvent as unassignAssistantFromEventApi,
-  updateUpcomingZoomEvent as updateUpcomingZoomEventApi
-} from "@/src/services/agendaApi";
+import { loadAgendaLibre } from "@/src/services/agendaApi";
 import {
   loadUsers,
-  submitCreateUser as submitCreateUserApi,
-  submitUpdateUserRole as submitUpdateUserRoleApi,
-  submitResendUserActivationLink as submitResendUserActivationLinkApi,
-  submitSendSelfActivationLinkTest as submitSendSelfActivationLinkTestApi,
-  loadGoogleAccountStatus,
-  unlinkGoogleAccount as unlinkGoogleAccountApi,
-  syncProfileFromGoogle as syncProfileFromGoogleApi,
-  updatePassword as updatePasswordApi
+  loadGoogleAccountStatus
 } from "@/src/services/userApi";
-import {
-  loadTarifas,
-  submitTarifaUpdate as submitTarifaUpdateApi
-} from "@/src/services/tarifasApi";
-import {
-  loadZoomAccounts,
-  loadManualPendings,
-  loadZoomUpcomingMeetings,
-  loadZoomPastMeetings,
-  registerUpcomingMeetingInSystem as registerUpcomingMeetingInSystemApi,
-  type ZoomUpcomingMeeting
-} from "@/src/services/zoomApi";
+import { loadTarifas } from "@/src/services/tarifasApi";
+import { loadManualPendings } from "@/src/services/zoomApi";
 import { useSolicitudes } from "@/src/hooks/useSolicitudes";
 import { useTarifas, type TarifaModalidad } from "@/src/hooks/useTarifas";
 import { useZoomAccounts } from "@/src/hooks/useZoomAccounts";
@@ -93,7 +46,6 @@ import { SpaTabHistoricoAsistencias } from "@/components/spa-tabs/SpaTabHistoric
 import { SpaTabAsignacion } from "@/components/spa-tabs/SpaTabAsignacion";
 import {
   SpaTabManual,
-  type ManualMeetingOption,
   type ManualResolutionInput
 } from "@/components/spa-tabs/SpaTabManual";
 import { SpaTabHistorico } from "@/components/spa-tabs/SpaTabHistorico";
@@ -108,22 +60,26 @@ import { SpaTabPerfil } from "@/components/spa-tabs/SpaTabPerfil";
 import { SpaTabEstadisticas } from "@/components/spa-tabs/SpaTabEstadisticas";
 import { SpaTabAgendaAdmin } from "@/components/spa-tabs/SpaTabAgendaAdmin";
 import { SpaTabNotificaciones } from "@/components/SpaTabNotificaciones";
-import { buildDocenteSolicitudPayload } from "@/components/spa-tabs/solicitud-payload-builder";
 import { SpaBusyOverlay } from "@/components/spa-home/SpaBusyOverlay";
 import { SpaSnackbar } from "@/components/spa-home/SpaSnackbar";
 import { useSpaBusyState } from "@/src/hooks/useSpaBusyState";
+import { useSpaAccess } from "@/src/hooks/useSpaAccess";
+import { useSpaHomeOptions } from "@/src/hooks/useSpaHomeOptions";
+import { useSpaProfileActions } from "@/src/hooks/useSpaProfileActions";
+import { useSpaUserActions } from "@/src/hooks/useSpaUserActions";
+import { useSpaZoomActions } from "@/src/hooks/useSpaZoomActions";
+import { useSpaPastMeetingActions } from "@/src/hooks/useSpaPastMeetingActions";
+import { useSpaProgramaActions } from "@/src/hooks/useSpaProgramaActions";
+import { useSpaSolicitudActions } from "@/src/hooks/useSpaSolicitudActions";
+import { useSpaAssignmentActions } from "@/src/hooks/useSpaAssignmentActions";
+import { useSpaTarifaActions } from "@/src/hooks/useSpaTarifaActions";
 import type {
   CurrentUser,
-  DocenteOption,
-  MonitorOption,
   PastMeetingZoomSeed
 } from "@/src/lib/spa-home/client-types";
 import {
-  DEFAULT_ZOOM_PAST_MONTHS_BACK,
   buildZoomPastMonthOptions,
-  parseEmailLines,
-  readJsonSafe,
-  resolveUserAccessEmails
+  readJsonSafe
 } from "@/src/lib/spa-home/client-utils";
 
 
@@ -277,61 +233,53 @@ export function SpaHomeScreen() {
     isUpdatingPassword, setIsUpdatingPassword, passwordForm, setPasswordForm, showPasswordForm, setShowPasswordForm
   } = useUserProfile();
 
-  const effectiveRole = useMemo<ViewRole | "">(
-    () => resolveEffectiveRoleForUser(user?.role),
-    [user?.role]
-  );
+  const {
+    effectiveRole,
+    canSeeManual,
+    canSeePastMeetings,
+    canSeeZoomAccounts,
+    canSeeUsers,
+    canSeeLogins,
+    canSeeAgendaLibre,
+    canSeeMisReunionesAsignadas,
+    canSeeMisAsistencias,
+    canSeeHistoricoAsistencias,
+    canSeeAsistentesAsignacion,
+    canSeeGestionAsistentes,
+    canSeeTarifas,
+    canSeeEstadisticas,
+    canSeeNotificaciones,
+    canSeeSolicitudes,
+    canSeeAgendaAdmin,
+    canSeeProgramas,
+    canSendSolicitudReminder,
+    canCreateSolicitudShortcut,
+    canEditSolicitudAssistance,
+    canEditSolicitudDuration,
+    canDelegateSolicitudResponsable
+  } = useSpaAccess(user);
 
-  const canSeeManual = canAccessTabForRole("manual", effectiveRole);
-  const canSeePastMeetings = canAccessTabForRole("historico", effectiveRole);
-  const canSeeZoomAccounts = canAccessTabForRole("cuentas", effectiveRole);
-  const canSeeUsers = canAccessTabForRole("usuarios", effectiveRole);
-  const canSeeLogins = canAccessTabForRole("logins", effectiveRole);
-  const canSeeAgendaLibre = canAccessTabForRole("agenda_libre", effectiveRole);
-  const canSeeMisReunionesAsignadas = canAccessTabForRole("mis_reuniones_asignadas", effectiveRole);
-  const canSeeMisAsistencias = canAccessTabForRole("mis_asistencias", effectiveRole);
-  const canSeeHistoricoAsistencias = canAccessTabForRole("historico_asistencias", effectiveRole);
-  const canSeeAsistentesAsignacion = canAccessTabForRole("asistentes_asignacion", effectiveRole);
-  const canSeeAsistentesPerfiles = canAccessTabForRole("asistentes_perfiles", effectiveRole);
-  const canSeeAsistentesEstadisticas = canAccessTabForRole("asistentes_estadisticas", effectiveRole);
-  const canSeeGestionAsistentes = canSeeAsistentesAsignacion || canSeeAsistentesPerfiles || canSeeAsistentesEstadisticas;
-  const canSeeTarifas = canAccessTabForRole("tarifas", effectiveRole);
-  const canSeeEstadisticas = canAccessTabForRole("estadisticas", effectiveRole);
-  const canSeeNotificaciones = canAccessTabForRole("notificaciones", effectiveRole);
-  const canSeeSolicitudes = canAccessTabForRole("solicitudes", effectiveRole);
-  const canSeeAgendaAdmin = canAccessTabForRole("agenda_admin", effectiveRole);
-  const canSeeProgramas = canAccessTabForRole("programas", effectiveRole);
-  const canSendSolicitudReminder = useMemo(
-    () => ["DOCENTE", "ADMINISTRADOR"].includes(effectiveRole),
-    [effectiveRole]
-  );
-  const canCreateSolicitudShortcut = useMemo(
-    () => ["DOCENTE", "ADMINISTRADOR"].includes(effectiveRole),
-    [effectiveRole]
-  );
-  const canEditSolicitudAssistance = useMemo(
-    () => ["DOCENTE", "ADMINISTRADOR"].includes(effectiveRole),
-    [effectiveRole]
-  );
-  const canEditSolicitudDuration = useMemo(
-    () => ["DOCENTE", "ADMINISTRADOR"].includes(effectiveRole),
-    [effectiveRole]
-  );
-  const canDelegateSolicitudResponsable = useMemo(
-    () => effectiveRole === "ADMINISTRADOR",
-    [effectiveRole]
-  );
-  const selectedZoomPastMonthsBack = useMemo(() => {
-    const selectedOption = zoomPastMonthOptions.find(
-      (option) => option.value === selectedZoomPastMonthKey
-    );
-    return selectedOption?.monthsBack ?? DEFAULT_ZOOM_PAST_MONTHS_BACK;
-  }, [selectedZoomPastMonthKey, zoomPastMonthOptions]);
-  const requesterAccessEmails = useMemo(() => resolveUserAccessEmails(user), [user]);
-  const requesterResponsibleEmail = useMemo(
-    () => requesterAccessEmails[0] ?? user?.email?.trim().toLowerCase() ?? "",
-    [requesterAccessEmails, user?.email]
-  );
+  const {
+    selectedZoomPastMonthsBack,
+    requesterResponsibleEmail,
+    docenteLinkedEmailOptions,
+    responsableOptions,
+    docenteOptions,
+    monitorOptions,
+    programaOptions,
+    manualAccountOptions,
+    manualMeetingOptionsByAccountId
+  } = useSpaHomeOptions({
+    effectiveRole,
+    user,
+    users,
+    programas,
+    zoomAccounts,
+    selectedZoomPastMonthKey,
+    zoomPastMonthOptions,
+    selectedResponsable: form.responsable
+  });
+
   function buildSummaryLoadOptions(
     role: ViewRole | "" = effectiveRole,
     targetTab: string = tab
@@ -340,227 +288,169 @@ export function SpaHomeScreen() {
       includeAdminZoomAlerts: role === "ADMINISTRADOR" && targetTab === "dashboard"
     };
   }
-  const docenteLinkedEmailOptions = useMemo(() => {
-    if (effectiveRole !== "ADMINISTRADOR") {
-      return requesterAccessEmails;
-    }
 
-    const selectedResponsibleEmail = form.responsable.trim().toLowerCase();
-    if (!selectedResponsibleEmail) return [];
+  const {
+    linkGoogleAccount,
+    unlinkGoogleAccount,
+    syncProfileFromGoogle,
+    submitProfile,
+    submitPassword
+  } = useSpaProfileActions({
+    profileForm,
+    passwordForm,
+    setMessage,
+    setUser,
+    setProfileForm,
+    setGoogleLinked,
+    setHasPassword,
+    setIsSyncingGoogleProfile,
+    setIsUnlinkingGoogleAccount,
+    setIsUpdatingProfile,
+    setIsUpdatingPassword,
+    setShowProfileForm,
+    setShowPasswordForm,
+    setPasswordForm
+  });
 
-    const matchingDocente = users.find((managedUser) => {
-      if (managedUser.role !== "DOCENTE") return false;
-      const candidateEmails = new Set(
-        [managedUser.email, ...(managedUser.emails ?? [])]
-          .map((email) => email.trim().toLowerCase())
-          .filter(Boolean)
-      );
-      return candidateEmails.has(selectedResponsibleEmail);
-    });
-    if (!matchingDocente) {
-      return [selectedResponsibleEmail];
-    }
+  const {
+    refreshUsers,
+    submitCreateUser,
+    updateUserRole,
+    resendUserActivationLink,
+    sendSelfActivationLinkTest
+  } = useSpaUserActions({
+    createUserForm,
+    setCreateUserForm,
+    setUsers,
+    setMessage,
+    setIsLoadingUsers,
+    setIsCreatingUser,
+    setUpdatingUserId,
+    setResendingActivationUserId,
+    setIsSendingSelfActivationLink
+  });
 
-    return Array.from(
-      new Set(
-        [matchingDocente.email, ...(matchingDocente.emails ?? [])]
-          .map((email) => email.trim().toLowerCase())
-          .filter(Boolean)
-      )
-    );
-  }, [effectiveRole, form.responsable, requesterAccessEmails, users]);
-  const responsableOptions = useMemo(() => {
-    const map = new Map<string, { value: string; label: string }>();
+  const {
+    refreshZoomAccounts,
+    refreshZoomUpcomingMeetings,
+    registerUpcomingMeetingInSystem,
+    refreshZoomPastMeetings,
+    selectZoomPastMonth
+  } = useSpaZoomActions({
+    selectedZoomPastMonthsBack,
+    setMessage,
+    setZoomGroupName,
+    setZoomAccounts,
+    setIsLoadingZoomAccounts,
+    setZoomUpcomingMeetings,
+    setIsLoadingZoomUpcomingMeetings,
+    setIsRegisteringUpcomingMeeting,
+    setZoomPastMeetings,
+    setIsLoadingZoomPastMeetings,
+    setSelectedZoomPastMonthKey,
+    refreshAfterSolicitudMutation
+  });
 
-    const addOption = (firstName: string | null | undefined, lastName: string | null | undefined, email: string) => {
-      const fullName = [firstName, lastName].filter(Boolean).join(" ").trim();
-      const normalizedEmail = email.trim().toLowerCase();
-      if (!normalizedEmail) return;
-      const key = normalizedEmail;
-      if (map.has(key)) return;
-      const label = fullName ? `${fullName} (${normalizedEmail})` : normalizedEmail;
-      map.set(key, { value: normalizedEmail, label });
-    };
+  const {
+    preloadPastMeetingFormFromZoom,
+    refreshPastMeetings,
+    updatePastMeetingRecord,
+    submitPastMeeting
+  } = useSpaPastMeetingActions({
+    pastMeetingForm,
+    pastMeetingZoomSeed,
+    docenteOptions,
+    monitorOptions,
+    buildSummaryLoadOptions,
+    setMessage,
+    setTab,
+    setPastMeetingForm,
+    setPastMeetingZoomSeed,
+    setIsLoadingPastMeetings,
+    setIsSubmittingPastMeeting,
+    setUpdatingPastMeetingId,
+    setPastMeetings,
+    setSolicitudes,
+    setSummary
+  });
 
-    const addOptionsForPerson = (
-      firstName: string | null | undefined,
-      lastName: string | null | undefined,
-      primaryEmail: string | null | undefined,
-      emails: string[] | null | undefined
-    ) => {
-      const normalizedEmails = new Set<string>();
-      if (primaryEmail) {
-        const normalizedPrimary = primaryEmail.trim().toLowerCase();
-        if (normalizedPrimary) normalizedEmails.add(normalizedPrimary);
-      }
-      for (const alias of emails ?? []) {
-        const normalizedAlias = alias.trim().toLowerCase();
-        if (!normalizedAlias) continue;
-        normalizedEmails.add(normalizedAlias);
-      }
-      for (const email of normalizedEmails) {
-        addOption(firstName, lastName, email);
-      }
-    };
+  const {
+    createProgramaOnDemand,
+    refreshProgramasView
+  } = useSpaProgramaActions({
+    setProgramas,
+    setSolicitudes,
+    setMessage,
+    setIsCreatingPrograma,
+    setIsRefreshingProgramas
+  });
 
-    for (const managedUser of users) {
-      if (managedUser.role !== "DOCENTE") continue;
-      addOptionsForPerson(
-        managedUser.firstName,
-        managedUser.lastName,
-        managedUser.email,
-        managedUser.emails
-      );
-    }
+  const {
+    submitDocenteSolicitud,
+    deleteSolicitud,
+    cancelSolicitudSerie,
+    cancelSolicitudInstancia,
+    restoreSolicitudInstancia,
+    addSolicitudInstancia,
+    sendSolicitudReminder,
+    editSolicitudMeetingDuration,
+    editUpcomingSolicitudMeeting,
+    reassignRecurringSolicitudResponsable,
+    enableSolicitudAssistance,
+    updateSolicitudAssistanceForInstance
+  } = useSpaSolicitudActions({
+    form,
+    responsableOptions,
+    docenteLinkedEmailOptions,
+    canDelegateSolicitudResponsable,
+    setMessage,
+    setDocenteSolicitudesView,
+    setIsSubmittingSolicitud,
+    setDeletingSolicitudId,
+    setCancellingSerieSolicitudId,
+    setCancellingInstanciaKey,
+    setRestoringInstanciaKey,
+    setAddingInstanciaSolicitudId,
+    setSendingReminderSolicitudId,
+    setUpdatingMeetingDurationEventId,
+    setUpdatingAsistenciaSolicitudId,
+    setUpdatingAsistenciaInstanciaKey,
+    refreshAfterSolicitudMutation
+  });
 
-    if (effectiveRole === "DOCENTE") {
-      addOptionsForPerson(user?.firstName, user?.lastName, user?.email, user?.emails);
-    }
+  const {
+    setInterest,
+    assignAssistantToEvent,
+    removeAssistanceFromAssignmentEvent,
+    onUnassignAssistantFromEvent,
+    suggestMonthlyAssignment,
+    suggestNextMonthlyAssignment
+  } = useSpaAssignmentActions({
+    agendaLibre,
+    selectedAssistantByEvent,
+    suggestionSessionId,
+    setAgendaLibre,
+    setHasLoadedAgendaLibre,
+    setUpdatingInterestId,
+    setMessage,
+    setAssignmentBoardEvents,
+    setAssignableAssistants,
+    setAssigningEventId,
+    setRemovingAssistanceAssignmentEventId,
+    setSummary,
+    setSuggestionSessionId,
+    setAssignmentSuggestion,
+    setIsLoadingSuggestion,
+    buildSummaryLoadOptions,
+    refreshAfterSolicitudMutation
+  });
 
-    return Array.from(map.values()).sort((a, b) => a.label.localeCompare(b.label, "es"));
-  }, [effectiveRole, users, user]);
-  const docenteOptions = useMemo<DocenteOption[]>(() => {
-    const map = new Map<string, DocenteOption>();
-
-    const addDocente = (
-      email: string | null | undefined,
-      firstName: string | null | undefined,
-      lastName: string | null | undefined,
-      name: string | null | undefined
-    ) => {
-      const normalizedEmail = (email ?? "").trim().toLowerCase();
-      if (!normalizedEmail) return;
-      if (map.has(normalizedEmail)) return;
-
-      const computedName =
-        (name ?? "").trim() ||
-        [firstName, lastName].filter(Boolean).join(" ").trim() ||
-        normalizedEmail;
-
-      map.set(normalizedEmail, {
-        value: normalizedEmail,
-        label: `${computedName} (${normalizedEmail})`,
-        nombre: computedName
-      });
-    };
-
-    for (const managedUser of users) {
-      if (managedUser.role !== "DOCENTE") continue;
-      const candidateEmails = new Set<string>([
-        managedUser.email,
-        ...(managedUser.emails ?? [])
-      ]);
-      for (const candidateEmail of candidateEmails) {
-        addDocente(
-          candidateEmail,
-          managedUser.firstName,
-          managedUser.lastName,
-          null
-        );
-      }
-    }
-
-    if (effectiveRole === "DOCENTE") {
-      const currentUserEmails = new Set<string>([user?.email ?? "", ...(user?.emails ?? [])]);
-      for (const candidateEmail of currentUserEmails) {
-        addDocente(candidateEmail, user?.firstName, user?.lastName, null);
-      }
-    }
-
-    return Array.from(map.values()).sort((a, b) => a.label.localeCompare(b.label, "es"));
-  }, [effectiveRole, users, user]);
-  const monitorOptions = useMemo<MonitorOption[]>(() => {
-    const map = new Map<string, MonitorOption>();
-
-    const addMonitor = (
-      email: string | null | undefined,
-      firstName: string | null | undefined,
-      lastName: string | null | undefined
-    ) => {
-      const normalizedEmail = (email ?? "").trim().toLowerCase();
-      if (!normalizedEmail) return;
-      if (map.has(normalizedEmail)) return;
-
-      const computedName = [firstName, lastName].filter(Boolean).join(" ").trim() || normalizedEmail;
-      map.set(normalizedEmail, {
-        value: normalizedEmail,
-        label: `${computedName} (${normalizedEmail})`,
-        nombre: computedName
-      });
-    };
-
-    for (const managedUser of users) {
-      if (normalizeAssistantRole(managedUser.role) !== "ASISTENTE_ZOOM") continue;
-      const candidateEmails = new Set<string>([
-        managedUser.email,
-        ...(managedUser.emails ?? [])
-      ]);
-      for (const candidateEmail of candidateEmails) {
-        addMonitor(candidateEmail, managedUser.firstName, managedUser.lastName);
-      }
-    }
-
-    return Array.from(map.values()).sort((a, b) => a.label.localeCompare(b.label, "es"));
-  }, [users, user]);
-  const programaOptions = useMemo(
-    () => programas.map((programa) => programa.nombre),
-    [programas]
-  );
-  const manualAccountOptions = useMemo(
-    () =>
-      zoomAccounts.map((account) => ({
-        id: account.id,
-        label: account.email || [account.firstName, account.lastName].filter(Boolean).join(" ").trim() || account.id
-      })),
-    [zoomAccounts]
-  );
-  const manualMeetingOptionsByAccountId = useMemo<Record<string, ManualMeetingOption[]>>(() => {
-    const byAccountId: Record<string, ManualMeetingOption[]> = {};
-    for (const account of zoomAccounts) {
-      const byMeetingId = new Map<
-        string,
-        {
-          zoomMeetingId: string;
-          zoomJoinUrl?: string;
-          topic: string;
-          firstStartTime: string;
-          instancesCount: number;
-        }
-      >();
-
-      for (const event of account.pendingEvents) {
-        const zoomMeetingId = (event.meetingId ?? "").trim();
-        if (!zoomMeetingId) continue;
-
-        const existing = byMeetingId.get(zoomMeetingId);
-        if (existing) {
-          existing.instancesCount += 1;
-          continue;
-        }
-
-        byMeetingId.set(zoomMeetingId, {
-          zoomMeetingId,
-          zoomJoinUrl: event.joinUrl || undefined,
-          topic: event.topic || "Sin titulo",
-          firstStartTime: event.startTime,
-          instancesCount: 1
-        });
-      }
-
-      const options = Array.from(byMeetingId.values()).map((meeting) => ({
-        id: meeting.zoomMeetingId,
-        zoomMeetingId: meeting.zoomMeetingId,
-        zoomJoinUrl: meeting.zoomJoinUrl,
-        label:
-          meeting.instancesCount > 1
-            ? `ID ${meeting.zoomMeetingId} | ${meeting.topic} | ${meeting.instancesCount} instancias`
-            : `ID ${meeting.zoomMeetingId} | ${meeting.topic} | ${formatDateTime(meeting.firstStartTime)}`
-      }));
-
-      byAccountId[account.id] = options;
-    }
-    return byAccountId;
-  }, [zoomAccounts]);
+  const { submitTarifaUpdate } = useSpaTarifaActions({
+    tarifaFormByModalidad,
+    setTarifas,
+    setMessage,
+    setIsSubmittingTarifa
+  });
 
   const { isGlobalBusy, globalBusyLabel } = useSpaBusyState({
     loading,
@@ -912,1342 +802,6 @@ export function SpaHomeScreen() {
     }
   }
 
-  async function submitDocenteSolicitud(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    setMessage("");
-
-    if (!form.tema.trim()) {
-      setMessage("Debes completar el tema.");
-      return;
-    }
-
-    setIsSubmittingSolicitud(true);
-    try {
-      const normalizedResponsable = form.responsable.trim().toLowerCase();
-      if (!normalizedResponsable) {
-        setMessage("Debes seleccionar la persona a cargo.");
-        return;
-      }
-      if (canDelegateSolicitudResponsable) {
-        const isValidResponsable = responsableOptions.some((option) => option.value === normalizedResponsable);
-        if (!isValidResponsable) {
-          setMessage("Debes seleccionar un docente válido como persona a cargo.");
-          return;
-        }
-      }
-
-      const metadata = [
-        `Responsable: ${normalizedResponsable || "No especificado"}`,
-        form.grabacion === "DEFINIR" ? "Grabación: A definir en clase" : undefined
-      ]
-        .filter(Boolean)
-        .join("\n");
-
-      const linkedDocenteEmail = form.correoVinculado.trim().toLowerCase();
-      if (!linkedDocenteEmail) {
-        setMessage("Debes seleccionar el correo vinculado de la reunion.");
-        return;
-      }
-      if (!docenteLinkedEmailOptions.includes(linkedDocenteEmail)) {
-        setMessage("El correo vinculado debe pertenecer al docente a cargo.");
-        return;
-      }
-
-      const normalizedAdditionalDocenteCopies = normalizeDocentesCorreosByLine(form.correosDocentes);
-      const normalizedDocentesCorreos = Array.from(
-        new Set([
-          linkedDocenteEmail,
-          ...(normalizedAdditionalDocenteCopies
-            ? normalizedAdditionalDocenteCopies.split("\n").filter(Boolean)
-            : [])
-        ])
-      ).join("\n");
-      const payload = buildDocenteSolicitudPayload({
-        form: {
-          ...form,
-          responsable: normalizedResponsable
-        },
-        metadata,
-        normalizedDocentesCorreos,
-        timezone: "America/Montevideo"
-      });
-
-      const response = await submitDocenteSolicitudApi(payload);
-      if (!response.success) {
-        setMessage(response.error ?? "No se pudo crear la solicitud.");
-        return;
-      }
-
-      setMessage(`Solicitud creada correctamente: ${response.requestId}`);
-      setDocenteSolicitudesView("list");
-      await refreshAfterSolicitudMutation();
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : "No se pudo crear la solicitud.");
-    } finally {
-      setIsSubmittingSolicitud(false);
-    }
-  }
-
-  async function deleteSolicitud(solicitudId: string) {
-    if (!window.confirm("Se eliminara la solicitud y tambien la reunion en Zoom. ¿Continuar?")) {
-      return;
-    }
-
-    setDeletingSolicitudId(solicitudId);
-    setMessage("");
-
-    try {
-      const response = await deleteSolicitudApi(solicitudId);
-      if (!response.success) {
-        setMessage(response.error ?? "No se pudo eliminar la solicitud.");
-        return;
-      }
-
-      const zoomMessage = response.zoomMeetingId
-        ? response.deletedInZoom
-          ? ` Reunión Zoom ${response.zoomMeetingId} eliminada.`
-          : ` Zoom no reportó eliminación para ${response.zoomMeetingId} (puede ya no existir).`
-        : "";
-      setMessage(`Solicitud eliminada correctamente.${zoomMessage}`);
-
-      await refreshAfterSolicitudMutation();
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : "No se pudo eliminar la solicitud.");
-    } finally {
-      setDeletingSolicitudId(null);
-    }
-  }
-
-  async function cancelSolicitudSerie(solicitudId: string, titulo: string) {
-    if (!window.confirm(`Se cancelara toda la serie de "${titulo}" en Zoom y en el sistema. ¿Continuar?`)) {
-      return;
-    }
-
-    setCancellingSerieSolicitudId(solicitudId);
-    setMessage("");
-
-    try {
-      const response = await cancelSolicitudSerieApi(solicitudId);
-      if (!response.success) {
-        setMessage(response.error ?? "No se pudo cancelar la serie.");
-        return;
-      }
-
-      const zoomMessage = response.result?.zoomMeetingId
-        ? response.result?.cancelledInZoom
-          ? ` Serie Zoom ${response.result.zoomMeetingId} cancelada.`
-          : ` Zoom no reportó cancelación para ${response.result.zoomMeetingId} (puede ya no existir).`
-        : "";
-      setMessage(`Serie cancelada correctamente.${zoomMessage}`);
-      await refreshAfterSolicitudMutation();
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : "No se pudo cancelar la serie.");
-    } finally {
-      setCancellingSerieSolicitudId(null);
-    }
-  }
-
-  async function cancelSolicitudInstancia(input: {
-    solicitudId: string;
-    titulo: string;
-    eventoId?: string | null;
-    occurrenceId?: string | null;
-    startTime: string;
-  }) {
-    const instanceDateLabel = formatDateTime(input.startTime);
-    if (!window.confirm(`Se cancelara la instancia ${instanceDateLabel} de "${input.titulo}". ¿Continuar?`)) {
-      return;
-    }
-
-    const instanceKey = `${input.solicitudId}:${input.eventoId ?? input.occurrenceId ?? input.startTime}`;
-    setCancellingInstanciaKey(instanceKey);
-    setMessage("");
-
-    try {
-      const response = await cancelSolicitudInstanciaApi({
-        solicitudId: input.solicitudId,
-        eventoId: input.eventoId ?? undefined,
-        occurrenceId: input.occurrenceId ?? undefined,
-        inicioProgramadoAt: input.startTime
-      });
-
-      if (!response.success) {
-        setMessage(response.error ?? "No se pudo cancelar la instancia.");
-        return;
-      }
-
-      const zoomMessage = response.result?.zoomMeetingId
-        ? response.result?.cancelledInZoom
-          ? ` Instancia cancelada en Zoom (${response.result.zoomMeetingId}).`
-          : ` Zoom no reportó cancelación (ID ${response.result.zoomMeetingId}).`
-        : "";
-      setMessage(`Instancia cancelada correctamente.${zoomMessage}`);
-      await refreshAfterSolicitudMutation();
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : "No se pudo cancelar la instancia.");
-    } finally {
-      setCancellingInstanciaKey(null);
-    }
-  }
-
-  async function restoreSolicitudInstancia(input: {
-    solicitudId: string;
-    titulo: string;
-    eventoId?: string | null;
-    startTime: string;
-  }) {
-    const instanceDateLabel = formatDateTime(input.startTime);
-    if (
-      !window.confirm(
-        `Se descancelara la instancia ${instanceDateLabel} de "${input.titulo}" y se sincronizara Zoom con lo registrado en la app. ¿Continuar?`
-      )
-    ) {
-      return;
-    }
-
-    const instanceKey = `${input.solicitudId}:${input.eventoId ?? input.startTime}`;
-    setRestoringInstanciaKey(instanceKey);
-    setMessage("");
-
-    try {
-      const response = await restoreSolicitudInstanciaApi({
-        solicitudId: input.solicitudId,
-        eventoId: input.eventoId ?? undefined,
-        inicioProgramadoAt: input.startTime
-      });
-
-      if (!response.success) {
-        setMessage(response.error ?? "No se pudo descancelar la instancia.");
-        return;
-      }
-
-      const source = response.result?.source ?? "";
-      const sourceLabel =
-        source === "RECURRENCIA_PRINCIPAL"
-          ? "recurrencia principal"
-          : source === "MEETING_DEDICADO_EXISTENTE"
-            ? "meeting dedicado existente"
-            : source === "MEETING_DEDICADO"
-              ? "meeting dedicado nuevo"
-              : "Zoom";
-      const meetingIdLabel = response.result?.zoomMeetingId ? ` (${response.result.zoomMeetingId})` : "";
-      setMessage(`Instancia descancelada y sincronizada con ${sourceLabel}${meetingIdLabel}.`);
-      await refreshAfterSolicitudMutation();
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : "No se pudo descancelar la instancia.");
-    } finally {
-      setRestoringInstanciaKey(null);
-    }
-  }
-
-  async function addSolicitudInstancia(input: {
-    solicitudId: string;
-    titulo: string;
-    inicioProgramadoAt: string;
-    finProgramadoAt: string;
-  }): Promise<boolean> {
-    setMessage("");
-    setAddingInstanciaSolicitudId(input.solicitudId);
-
-    try {
-      const response = await addSolicitudInstanciaApi({
-        solicitudId: input.solicitudId,
-        inicioProgramadoAt: input.inicioProgramadoAt,
-        finProgramadoAt: input.finProgramadoAt
-      });
-
-      if (!response.success) {
-        setMessage(response.error ?? "No se pudo agregar la instancia.");
-        return false;
-      }
-
-      const usedPrimaryMeeting = response.result?.usaMeetingPrincipal !== false;
-      const resolvedMeetingId = (response.result?.zoomMeetingId ?? "").trim();
-      if (usedPrimaryMeeting) {
-        setMessage(
-          resolvedMeetingId
-            ? `Instancia agregada en "${input.titulo}" usando el mismo ID (${resolvedMeetingId}).`
-            : `Instancia agregada en "${input.titulo}" usando el mismo ID.`
-        );
-      } else {
-        setMessage(
-          resolvedMeetingId
-            ? `Instancia agregada en "${input.titulo}" con nuevo ID (${resolvedMeetingId}) por superposición de horario.`
-            : `Instancia agregada en "${input.titulo}" con nuevo ID por superposición de horario.`
-        );
-      }
-      await refreshAfterSolicitudMutation();
-      return true;
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : "No se pudo agregar la instancia.");
-      return false;
-    } finally {
-      setAddingInstanciaSolicitudId(null);
-    }
-  }
-
-  async function sendSolicitudReminder(input: {
-    solicitudId: string;
-    toEmail?: string;
-    mensaje?: string;
-  }): Promise<boolean> {
-    setMessage("");
-    setSendingReminderSolicitudId(input.solicitudId);
-    try {
-      const response = await sendSolicitudReminderApi({
-        solicitudId: input.solicitudId,
-        toEmail: input.toEmail,
-        mensaje: input.mensaje
-      });
-      if (!response.success) {
-        setMessage(response.error ?? "No se pudo enviar el recordatorio.");
-        return false;
-      }
-      setMessage(
-        response.sentTo
-          ? `Recordatorio enviado a ${response.sentTo}.`
-          : "Recordatorio enviado correctamente."
-      );
-      return true;
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : "No se pudo enviar el recordatorio.");
-      return false;
-    } finally {
-      setSendingReminderSolicitudId(null);
-    }
-  }
-
-  async function editSolicitudMeetingDuration(input: {
-    eventoId: string;
-    titulo: string;
-    inicioProgramadoAt: string;
-    minutosReales: number;
-  }): Promise<boolean> {
-    setMessage("");
-    setUpdatingMeetingDurationEventId(input.eventoId);
-
-    try {
-      const normalizedMinutes = Math.floor(input.minutosReales);
-      if (!Number.isFinite(normalizedMinutes) || normalizedMinutes < 1 || normalizedMinutes > 1440) {
-        setMessage("La duración real debe estar entre 1 y 1440 minutos.");
-        return false;
-      }
-
-      const response = await updatePastMeetingApi({
-        eventoId: input.eventoId,
-        minutosReales: normalizedMinutes
-      });
-      if (!response.success) {
-        setMessage(response.error ?? "No se pudo actualizar la duración de la reunión.");
-        return false;
-      }
-
-      const fechaLabel = new Date(input.inicioProgramadoAt).toLocaleString("es-UY", {
-        dateStyle: "short",
-        timeStyle: "short"
-      });
-      setMessage(`Duración real actualizada (${normalizedMinutes} min) en "${input.titulo}" (${fechaLabel}).`);
-      await refreshAfterSolicitudMutation();
-      return true;
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : "No se pudo actualizar la duración de la reunión.");
-      return false;
-    } finally {
-      setUpdatingMeetingDurationEventId(null);
-    }
-  }
-
-  async function editUpcomingSolicitudMeeting(input: {
-    solicitudId: string;
-    eventoId: string;
-    titulo: string;
-    programaNombre: string;
-    responsableNombre?: string;
-    docenteCreadorNombre?: string;
-    isRecurring?: boolean;
-    inicioProgramadoAt?: string;
-    finProgramadoAt?: string;
-    modalidadReunion?: string;
-    targetOccurrenceId?: string;
-    targetPreviousStart?: string;
-  }): Promise<boolean> {
-    setMessage("");
-
-    try {
-      const normalizedTitle = input.titulo.trim();
-      const normalizedProgram = input.programaNombre.trim();
-      const normalizedResponsible = input.responsableNombre?.trim() ?? "";
-      const normalizedCreator = input.docenteCreadorNombre?.trim().toLowerCase() ?? "";
-
-      if (!normalizedTitle) {
-        setMessage("Debes completar el tema de la reunión.");
-        return false;
-      }
-      if (!normalizedProgram) {
-        setMessage("Debes completar el programa.");
-        return false;
-      }
-      const updateMeetingResponse = await updateUpcomingZoomEventApi(input.eventoId, {
-        titulo: normalizedTitle,
-        programaNombre: normalizedProgram,
-        responsableNombre: normalizedResponsible || undefined,
-        inicioProgramadoAt: input.inicioProgramadoAt,
-        finProgramadoAt: input.finProgramadoAt,
-        modalidadReunion: input.modalidadReunion,
-        targetOccurrenceId: input.targetOccurrenceId,
-        targetPreviousStart: input.targetPreviousStart
-      });
-
-      if (!updateMeetingResponse.success) {
-        setMessage(updateMeetingResponse.error ?? "No se pudo actualizar la reunión.");
-        return false;
-      }
-      const meetingUpdated = Boolean(updateMeetingResponse.result?.updated);
-
-      let creatorUpdated = false;
-      const canUpdateCreatorFromEdit =
-        canDelegateSolicitudResponsable && input.isRecurring && normalizedCreator;
-
-      if (canUpdateCreatorFromEdit) {
-        if (!normalizedResponsible) {
-          setMessage("Debes seleccionar la persona a cargo para actualizar el docente creador.");
-          return false;
-        }
-        const reassignResponse = await reassignRecurringSolicitudResponsableApi({
-          solicitudId: input.solicitudId,
-          responsableNombre: normalizedResponsible,
-          docenteCreadorNombre: normalizedCreator
-        });
-        if (!reassignResponse.success) {
-          setMessage(reassignResponse.error ?? "No se pudo actualizar el docente creador.");
-          return false;
-        }
-        creatorUpdated = Boolean(reassignResponse.updated);
-      }
-
-      if (!meetingUpdated && !creatorUpdated) {
-        setMessage("No se detectaron cambios para guardar.");
-        return true;
-      }
-
-      if (meetingUpdated && creatorUpdated) {
-        setMessage("Recurrencia actualizada correctamente (incluye docente creador).");
-      } else if (creatorUpdated) {
-        setMessage("Docente creador actualizado correctamente.");
-      } else {
-        setMessage("Reunión actualizada correctamente.");
-      }
-
-      await refreshAfterSolicitudMutation();
-      return true;
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : "No se pudo actualizar la reunión.");
-      return false;
-    }
-  }
-
-  async function reassignRecurringSolicitudResponsable(input: {
-    solicitudId: string;
-    titulo: string;
-    responsableNombre: string;
-    docenteCreadorNombre: string;
-  }): Promise<boolean> {
-    setMessage("");
-
-    try {
-      const nextResponsible = input.responsableNombre.trim().toLowerCase();
-      if (!nextResponsible) {
-        setMessage("Debes seleccionar el nuevo docente a cargo.");
-        return false;
-      }
-      const nextCreator = input.docenteCreadorNombre.trim().toLowerCase();
-      if (!nextCreator) {
-        setMessage("Debes seleccionar el nuevo docente creador.");
-        return false;
-      }
-
-      const response = await reassignRecurringSolicitudResponsableApi({
-        solicitudId: input.solicitudId,
-        responsableNombre: nextResponsible,
-        docenteCreadorNombre: nextCreator
-      });
-      if (!response.success) {
-        setMessage(response.error ?? "No se pudo actualizar el pedido recurrente.");
-        return false;
-      }
-
-      if (response.updated === false) {
-        setMessage("El pedido ya tenía ese docente a cargo y creador.");
-        return true;
-      }
-
-      setMessage(`Pedido recurrente "${input.titulo}" actualizado correctamente.`);
-      await refreshAfterSolicitudMutation();
-      return true;
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : "No se pudo actualizar el pedido recurrente.");
-      return false;
-    }
-  }
-
-  async function enableSolicitudAssistance(input: {
-    solicitudId: string;
-    titulo: string;
-    requiereAsistencia: boolean;
-  }) {
-    const nextRequiresAssistance = !input.requiereAsistencia;
-    const confirmMessage = nextRequiresAssistance
-      ? `Se habilitara asistencia Zoom para "${input.titulo}" en sus instancias activas. ¿Continuar?`
-      : `Se quitara la asistencia Zoom para "${input.titulo}". Si hay asistentes asignados, recibiran un correo de cancelacion. ¿Continuar?`;
-    if (!window.confirm(confirmMessage)) {
-      return;
-    }
-
-    setMessage("");
-    setUpdatingAsistenciaSolicitudId(input.solicitudId);
-
-    try {
-      const response = await enableSolicitudAsistenciaApi({
-        solicitudId: input.solicitudId,
-        requiereAsistencia: nextRequiresAssistance
-      });
-      if (!response.success) {
-        setMessage(
-          response.error ??
-            (nextRequiresAssistance
-              ? "No se pudo habilitar asistencia Zoom."
-              : "No se pudo deshabilitar asistencia Zoom.")
-        );
-        return;
-      }
-
-      if (nextRequiresAssistance) {
-        if (response.alreadyEnabled) {
-          setMessage("La solicitud ya tenia asistencia Zoom habilitada.");
-        } else {
-          const updatedCount = response.updatedEvents ?? 0;
-          setMessage(
-            updatedCount > 0
-              ? `Asistencia Zoom habilitada. Se actualizaron ${updatedCount} instancia(s).`
-              : "Asistencia Zoom habilitada."
-          );
-        }
-      } else if (response.alreadyDisabled) {
-        setMessage("La solicitud ya tenia asistencia Zoom deshabilitada.");
-      } else {
-        const updatedCount = response.updatedEvents ?? 0;
-        const cancelledAssignments = response.cancelledAssignments ?? 0;
-        const notifiedAssistants = response.notifiedAssistants ?? 0;
-        const details = [
-          `instancia(s) actualizadas: ${updatedCount}`,
-          `asignacion(es) canceladas: ${cancelledAssignments}`,
-          `correo(s) enviados: ${notifiedAssistants}`
-        ];
-        setMessage(`Asistencia Zoom deshabilitada (${details.join(", ")}).`);
-      }
-
-      await refreshAfterSolicitudMutation();
-    } catch (error) {
-      setMessage(
-        error instanceof Error
-          ? error.message
-          : nextRequiresAssistance
-            ? "No se pudo habilitar asistencia Zoom."
-            : "No se pudo deshabilitar asistencia Zoom."
-      );
-    } finally {
-      setUpdatingAsistenciaSolicitudId(null);
-    }
-  }
-
-  async function updateSolicitudAssistanceForInstance(input: {
-    solicitudId: string;
-    titulo: string;
-    eventoId?: string | null;
-    startTime: string;
-    requiereAsistencia: boolean;
-  }) {
-    const instanceDateLabel = formatDateTime(input.startTime);
-    const confirmMessage = input.requiereAsistencia
-      ? `Se habilitara asistencia Zoom solo para la instancia ${instanceDateLabel} de "${input.titulo}". ¿Continuar?`
-      : `Se quitara la asistencia Zoom solo para la instancia ${instanceDateLabel} de "${input.titulo}". Si habia una persona asignada recibira correo de cancelacion. ¿Continuar?`;
-    if (!window.confirm(confirmMessage)) {
-      return;
-    }
-
-    const instanceKey = `${input.solicitudId}:${input.eventoId ?? input.startTime}`;
-    setMessage("");
-    setUpdatingAsistenciaInstanciaKey(instanceKey);
-
-    try {
-      const response = await updateSolicitudInstanciaAsistenciaApi({
-        solicitudId: input.solicitudId,
-        eventoId: input.eventoId ?? undefined,
-        inicioProgramadoAt: input.startTime,
-        requiereAsistencia: input.requiereAsistencia
-      });
-
-      if (!response.success) {
-        setMessage(response.error ?? "No se pudo actualizar asistencia Zoom para la instancia.");
-        return;
-      }
-
-      if (input.requiereAsistencia) {
-        if (response.alreadyEnabled) {
-          setMessage("La instancia ya tenia asistencia Zoom habilitada.");
-        } else {
-          setMessage(`Asistencia Zoom habilitada para la instancia ${instanceDateLabel}.`);
-        }
-      } else {
-        if (response.alreadyDisabled) {
-          setMessage("La instancia ya tenia asistencia Zoom deshabilitada.");
-        } else {
-          const cancelledAssignments = response.cancelledAssignments ?? 0;
-          const notifiedAssistants = response.notifiedAssistants ?? 0;
-          setMessage(
-            `Asistencia Zoom deshabilitada para la instancia ${instanceDateLabel} (asignaciones canceladas: ${cancelledAssignments}, correos enviados: ${notifiedAssistants}).`
-          );
-        }
-      }
-
-      await refreshAfterSolicitudMutation();
-    } catch (error) {
-      setMessage(
-        error instanceof Error
-          ? error.message
-          : "No se pudo habilitar asistencia Zoom para la instancia."
-      );
-    } finally {
-      setUpdatingAsistenciaInstanciaKey(null);
-    }
-  }
-
-  async function setInterest(eventoId: string, estadoInteres: "ME_INTERESA" | "NO_ME_INTERESA" | "RETIRADO") {
-    setUpdatingInterestId(eventoId);
-    const previousAgenda = agendaLibre;
-    const optimisticAnsweredAt = new Date().toISOString();
-    setAgendaLibre((current) =>
-      current.map((event) => {
-        if (event.id !== eventoId) return event;
-        return {
-          ...event,
-          intereses: [
-            {
-              id: event.intereses[0]?.id ?? `temp-${eventoId}`,
-              estadoInteres,
-              fechaRespuestaAt: optimisticAnsweredAt
-            }
-          ]
-        };
-      })
-    );
-
-    try {
-      const response = await setInterestApi(eventoId, estadoInteres);
-      if (!response.success) {
-        setAgendaLibre(previousAgenda);
-        setMessage(response.error ?? "No se pudo registrar interés.");
-        return;
-      }
-      setMessage("Interés actualizado.");
-      const [agendaData, assignmentData] = await Promise.all([loadAgendaLibre(), loadAssignmentBoard()]);
-      if (agendaData) setAgendaLibre(agendaData);
-      setHasLoadedAgendaLibre(true);
-      if (assignmentData) {
-        setAssignmentBoardEvents(assignmentData.events ?? []);
-        setAssignableAssistants(assignmentData.assistants ?? []);
-      }
-    } catch (error) {
-      setAgendaLibre(previousAgenda);
-      setMessage(error instanceof Error ? error.message : "No se pudo registrar interés.");
-    } finally {
-      setUpdatingInterestId(null);
-    }
-  }
-
-  async function assignAssistantToEvent(eventoId: string) {
-    const asistenteZoomId = selectedAssistantByEvent[eventoId];
-    if (!asistenteZoomId) {
-      setMessage("Debes seleccionar una persona para asignar.");
-      return;
-    }
-
-    setAssigningEventId(eventoId);
-    try {
-      const response = await assignAssistantToEventApi(eventoId, asistenteZoomId);
-      if (!response.success) {
-        setMessage(response.error ?? "No se pudo asignar asistencia.");
-        return;
-      }
-
-      setMessage("Asignacion registrada.");
-      const [assignmentData, summaryData] = await Promise.all([
-        loadAssignmentBoard(),
-        loadSummary(buildSummaryLoadOptions())
-      ]);
-      if (assignmentData) {
-        setAssignmentBoardEvents(assignmentData.events ?? []);
-        setAssignableAssistants(assignmentData.assistants ?? []);
-      }
-      if (summaryData) setSummary(summaryData);
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : "No se pudo asignar asistencia.");
-    } finally {
-      setAssigningEventId(null);
-    }
-  }
-
-  async function removeAssistanceFromAssignmentEvent(input: {
-    eventoId: string;
-    solicitudId: string;
-    titulo: string;
-    inicioProgramadoAt: string;
-  }) {
-    const instanceDateLabel = formatDateTime(input.inicioProgramadoAt);
-    const confirmMessage =
-      `Se quitara la asistencia Zoom para la reunion ${instanceDateLabel} de "${input.titulo}". Si hay una persona asignada se notificara la cancelacion. ¿Continuar?`;
-    if (!window.confirm(confirmMessage)) {
-      return;
-    }
-
-    setRemovingAssistanceAssignmentEventId(input.eventoId);
-    setMessage("");
-    try {
-      const response = await updateSolicitudInstanciaAsistenciaApi({
-        solicitudId: input.solicitudId,
-        eventoId: input.eventoId,
-        requiereAsistencia: false
-      });
-
-      if (!response.success) {
-        setMessage(response.error ?? "No se pudo quitar asistencia de la reunion.");
-        return;
-      }
-
-      if (response.alreadyDisabled) {
-        setMessage("La reunion ya no requeria asistencia.");
-      } else {
-        const cancelledAssignments = response.cancelledAssignments ?? 0;
-        const notifiedAssistants = response.notifiedAssistants ?? 0;
-        setMessage(
-          `Asistencia removida para la reunion ${instanceDateLabel} (asignaciones canceladas: ${cancelledAssignments}, correos enviados: ${notifiedAssistants}).`
-        );
-      }
-
-      await refreshAfterSolicitudMutation();
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : "No se pudo quitar asistencia de la reunion.");
-    } finally {
-      setRemovingAssistanceAssignmentEventId(null);
-    }
-  }
-
-  async function onUnassignAssistantFromEvent(eventoId: string) {
-    if (!window.confirm("¿Deseas quitar a la persona asignada? El requerimiento de asistencia se mantendrá y la reunión volverá a Pendientes.")) {
-      return;
-    }
-
-    setRemovingAssistanceAssignmentEventId(eventoId);
-    try {
-      const response = await unassignAssistantFromEventApi(eventoId);
-      if (!response.success) {
-        setMessage(response.error ?? "No se pudo desasignar asistencia.");
-        return;
-      }
-
-      setMessage("Asistente desasignado. La reunión volvió a Pendientes.");
-      await Promise.all([
-        loadAssignmentBoard(),
-        loadSummary(buildSummaryLoadOptions())
-      ]).then(([assignmentData, summaryData]) => {
-        if (assignmentData) {
-          setAssignmentBoardEvents(assignmentData.events ?? []);
-          setAssignableAssistants(assignmentData.assistants ?? []);
-        }
-        if (summaryData) setSummary(summaryData);
-      });
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : "No se pudo desasignar asistencia.");
-    } finally {
-      setRemovingAssistanceAssignmentEventId(null);
-    }
-  }
-
-  async function suggestMonthlyAssignment() {
-    setIsLoadingSuggestion(true);
-    try {
-      const response = await loadAssignmentSuggestion();
-      if (!response) {
-        setMessage("No se pudo generar sugerencias de asignación.");
-        return;
-      }
-
-      setSuggestionSessionId(response.sessionId);
-      setAssignmentSuggestion(response.suggestion ?? null);
-
-      if (!response.suggestion) {
-        setMessage(response.message ?? "No se encontró una sugerencia válida para los eventos pendientes.");
-        return;
-      }
-      setMessage(
-        `Sugerencia generada (alcance ${response.scopeKey}). Puntaje: ${response.suggestion.score.toFixed(2)}. Revisa y aplica por reunion.`
-      );
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : "No se pudo generar sugerencias de asignación.");
-    } finally {
-      setIsLoadingSuggestion(false);
-    }
-  }
-
-  async function suggestNextMonthlyAssignment() {
-    if (!suggestionSessionId) {
-      setMessage("Primero debes generar una sugerencia inicial.");
-      return;
-    }
-
-    setIsLoadingSuggestion(true);
-    try {
-      const response = await loadNextAssignmentSuggestion(suggestionSessionId);
-      if (!response) {
-        setMessage("No se pudo obtener la siguiente sugerencia.");
-        return;
-      }
-
-      setSuggestionSessionId(response.sessionId);
-      setAssignmentSuggestion(response.suggestion ?? null);
-
-      if (!response.suggestion) {
-        setMessage(response.message ?? "No hay más sugerencias equivalentes disponibles.");
-        return;
-      }
-      setMessage(`Alternativa lista. Puntaje: ${response.suggestion.score.toFixed(2)}. Revisa y aplica por reunion.`);
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : "No se pudo obtener la siguiente sugerencia.");
-    } finally {
-      setIsLoadingSuggestion(false);
-    }
-  }
-
-  async function linkGoogleAccount() {
-    setMessage("");
-    await signIn("google", { callbackUrl: "/" });
-  }
-
-  async function unlinkGoogleAccount() {
-    setIsUnlinkingGoogleAccount(true);
-    setMessage("");
-    try {
-      const response = await unlinkGoogleAccountApi();
-      if (!response.success) {
-        setMessage(response.error ?? "No se pudo desvincular la cuenta de Google.");
-        return;
-      }
-      setGoogleLinked(false);
-      setMessage(response.message ?? "Cuenta de Google desvinculada.");
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : "No se pudo desvincular la cuenta de Google.");
-    } finally {
-      setIsUnlinkingGoogleAccount(false);
-    }
-  }
-
-  async function syncProfileFromGoogle() {
-    setIsSyncingGoogleProfile(true);
-    setMessage("");
-    try {
-      const response = await syncProfileFromGoogleApi();
-      if (!response.success) {
-        setMessage(response.error ?? "No se pudo sincronizar el perfil con Google.");
-        return;
-      }
-      if (response.user) {
-        setUser(response.user);
-        setProfileForm({
-          firstName: response.user.firstName ?? "",
-          lastName: response.user.lastName ?? "",
-          image: response.user.image ?? ""
-        });
-      }
-      setMessage(response.message ?? "Perfil sincronizado con Google.");
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : "No se pudo sincronizar el perfil con Google.");
-    } finally {
-      setIsSyncingGoogleProfile(false);
-    }
-  }
-
-  async function refreshUsers() {
-    setIsLoadingUsers(true);
-    try {
-      const users = await loadUsers();
-      if (users) setUsers(users);
-    } finally {
-      setIsLoadingUsers(false);
-    }
-  }
-
-  async function refreshZoomAccounts() {
-    setIsLoadingZoomAccounts(true);
-    try {
-      const result = await loadZoomAccounts();
-      if (result.error) {
-        setMessage(result.error);
-        return;
-      }
-      setZoomGroupName(result.groupName);
-      setZoomAccounts(result.accounts);
-    } finally {
-      setIsLoadingZoomAccounts(false);
-    }
-  }
-
-  async function submitCreateUser(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    setMessage("");
-    setIsCreatingUser(true);
-
-    try {
-      const parsedEmails = parseEmailLines(createUserForm.emails);
-      if (parsedEmails.length === 0) {
-        setMessage("Debes indicar al menos un correo de acceso.");
-        return;
-      }
-
-      const response = await submitCreateUserApi({
-        firstName: createUserForm.firstName,
-        lastName: createUserForm.lastName,
-        emails: parsedEmails,
-        role: createUserForm.role
-      });
-
-      if (!response.success) {
-        setMessage(response.error ?? "No se pudo crear el usuario.");
-        return;
-      }
-
-      setCreateUserForm((prev) => ({
-        ...prev,
-        emails: "",
-        firstName: "",
-        lastName: "",
-        role: "DOCENTE"
-      }));
-      setMessage("Usuario creado. Enviamos un enlace de activacion por correo para completar el alta.");
-      const users = await loadUsers();
-      if (users) setUsers(users);
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : "No se pudo crear el usuario.");
-    } finally {
-      setIsCreatingUser(false);
-    }
-  }
-
-  async function submitTarifaUpdate(modalidad: TarifaModalidad) {
-    setMessage("");
-
-    const form = tarifaFormByModalidad[modalidad];
-    const parsedValue = Number(form.valorHora.replace(",", "."));
-    if (!Number.isFinite(parsedValue) || parsedValue < 0) {
-      setMessage("Valor hora invalido.");
-      return;
-    }
-
-    setIsSubmittingTarifa(true);
-    try {
-      const response = await submitTarifaUpdateApi({
-        modalidadReunion: modalidad,
-        valorHora: parsedValue,
-        moneda: form.moneda.trim() || "UYU"
-      });
-      if (!response.success) {
-        setMessage(response.error ?? "No se pudo actualizar la tarifa.");
-        return;
-      }
-      setMessage(`Tarifa actualizada para ${modalidad}.`);
-      const tarifas = await loadTarifas();
-      if (tarifas) setTarifas(tarifas);
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : "No se pudo actualizar la tarifa.");
-    } finally {
-      setIsSubmittingTarifa(false);
-    }
-  }
-
-  async function updateUserRole(userId: string, role: string, emails: string[]) {
-    setMessage("");
-    setUpdatingUserId(userId);
-    try {
-      const normalizedEmails = parseEmailLines(emails.join("\n"));
-      if (normalizedEmails.length === 0) {
-        setMessage("Debes indicar al menos un correo de acceso.");
-        return;
-      }
-
-      const response = await submitUpdateUserRoleApi({ userId, role, emails: normalizedEmails });
-      if (!response.success) {
-        setMessage(response.error ?? "No se pudo actualizar el usuario.");
-        return;
-      }
-
-      const users = await loadUsers();
-      if (users) setUsers(users);
-      setMessage("Usuario actualizado correctamente.");
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : "No se pudo actualizar el usuario.");
-    } finally {
-      setUpdatingUserId(null);
-    }
-  }
-
-  async function resendUserActivationLink(userId: string) {
-    setMessage("");
-    setResendingActivationUserId(userId);
-    try {
-      const response = await submitResendUserActivationLinkApi({ userId });
-      if (!response.success) {
-        setMessage(response.error ?? "No se pudo reenviar el enlace de activacion.");
-        return;
-      }
-      setMessage("Enlace de activacion reenviado correctamente.");
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : "No se pudo reenviar el enlace de activacion.");
-    } finally {
-      setResendingActivationUserId(null);
-    }
-  }
-
-  async function sendSelfActivationLinkTest() {
-    setMessage("");
-    setIsSendingSelfActivationLink(true);
-    try {
-      const response = await submitSendSelfActivationLinkTestApi();
-      if (!response.success) {
-        setMessage(response.error ?? "No se pudo enviar el enlace de prueba.");
-        return;
-      }
-      setMessage("Enlace de prueba enviado a tu correo.");
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : "No se pudo enviar el enlace de prueba.");
-    } finally {
-      setIsSendingSelfActivationLink(false);
-    }
-  }
-
-  function toDateTimeLocalInput(value: string): string {
-    if (!value) return "";
-    const date = new Date(value);
-    if (Number.isNaN(date.getTime())) return "";
-
-    const year = date.getFullYear();
-    const month = String(date.getMonth() + 1).padStart(2, "0");
-    const day = String(date.getDate()).padStart(2, "0");
-    const hour = String(date.getHours()).padStart(2, "0");
-    const minute = String(date.getMinutes()).padStart(2, "0");
-    return `${year}-${month}-${day}T${hour}:${minute}`;
-  }
-
-  async function refreshZoomUpcomingMeetings() {
-    setIsLoadingZoomUpcomingMeetings(true);
-    try {
-      const result = await loadZoomUpcomingMeetings();
-      if (result.error) {
-        setMessage(result.error);
-        return;
-      }
-      setZoomGroupName(result.groupName);
-      setZoomUpcomingMeetings(result.meetings);
-    } finally {
-      setIsLoadingZoomUpcomingMeetings(false);
-    }
-  }
-
-  async function registerUpcomingMeetingInSystem(input: {
-    meeting: ZoomUpcomingMeeting;
-    responsableNombre: string;
-    programaNombre: string;
-    modalidadReunion: "VIRTUAL" | "HIBRIDA";
-    requiereAsistencia: boolean;
-    descripcion?: string;
-  }): Promise<boolean> {
-    setMessage("");
-    setIsRegisteringUpcomingMeeting(true);
-    try {
-      const response = await registerUpcomingMeetingInSystemApi({
-        titulo: input.meeting.topic || "Sin titulo",
-        responsableNombre: input.responsableNombre,
-        programaNombre: input.programaNombre,
-        modalidadReunion: input.modalidadReunion,
-        inicioProgramadoAt: input.meeting.startTime,
-        finProgramadoAt: input.meeting.endTime,
-        timezone: input.meeting.timezone || "America/Montevideo",
-        zoomMeetingId: input.meeting.meetingId ?? undefined,
-        zoomJoinUrl: input.meeting.joinUrl || undefined,
-        zoomAccountId: input.meeting.accountId || undefined,
-        zoomAccountEmail: input.meeting.accountEmail || undefined,
-        requiereAsistencia: input.requiereAsistencia,
-        descripcion: input.descripcion
-      });
-      if (!response.success) {
-        setMessage(response.error ?? "No se pudo registrar la reunion en sistema.");
-        return false;
-      }
-
-      setMessage("Reunion registrada en sistema correctamente.");
-      await Promise.all([refreshAfterSolicitudMutation(), refreshZoomUpcomingMeetings()]);
-      return true;
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : "No se pudo registrar la reunion en sistema.");
-      return false;
-    } finally {
-      setIsRegisteringUpcomingMeeting(false);
-    }
-  }
-
-  async function refreshZoomPastMeetings(monthsBack = selectedZoomPastMonthsBack) {
-    setIsLoadingZoomPastMeetings(true);
-    try {
-      const result = await loadZoomPastMeetings({ monthsBack });
-      if (result.error) {
-        setMessage(result.error);
-        return;
-      }
-      setZoomGroupName(result.groupName);
-      setZoomPastMeetings(result.meetings);
-    } finally {
-      setIsLoadingZoomPastMeetings(false);
-    }
-  }
-
-  function selectZoomPastMonth(monthKey: string) {
-    setSelectedZoomPastMonthKey(monthKey);
-  }
-
-  function preloadPastMeetingFormFromZoom(meeting: ZoomUpcomingMeeting) {
-    const seed: PastMeetingZoomSeed | null =
-      meeting.meetingId && meeting.startTime && meeting.endTime
-        ? {
-            meetingId: meeting.meetingId,
-            topic: meeting.topic || "Sin titulo",
-            startTime: meeting.startTime,
-            endTime: meeting.endTime,
-            joinUrl: meeting.joinUrl || "",
-            accountEmail: meeting.accountEmail || "sin cuenta"
-          }
-        : null;
-
-    setPastMeetingZoomSeed(seed);
-    setPastMeetingForm({
-      titulo: meeting.topic || "",
-      modalidadReunion: "VIRTUAL",
-      docenteEmail: "",
-      responsableEmail: "",
-      monitorEmail: "",
-      zoomMeetingId: meeting.meetingId ?? "",
-      inicioRealAt: toDateTimeLocalInput(meeting.startTime),
-      finRealAt: toDateTimeLocalInput(meeting.endTime),
-      programaNombre: "",
-      descripcion: `Registro importado desde Zoom (${meeting.accountEmail || "sin cuenta"}).`,
-      zoomJoinUrl: meeting.joinUrl || ""
-    });
-    setTab("historico");
-    setMessage(
-      seed
-        ? "Registro asistido: datos base bloqueados segun Zoom. Completa solo los campos faltantes."
-        : "Formulario de reunion pasada precargado con datos de Zoom."
-    );
-  }
-
-  async function refreshPastMeetings() {
-    setIsLoadingPastMeetings(true);
-    try {
-      const meetings = await loadPastMeetings();
-      if (!meetings) {
-        setMessage("No se pudo cargar la lista de reuniones pasadas.");
-        return;
-      }
-      setPastMeetings(meetings);
-    } finally {
-      setIsLoadingPastMeetings(false);
-    }
-  }
-
-  async function updatePastMeetingRecord(input: {
-    eventoId: string;
-    programaNombre: string;
-    monitorEmail?: string;
-    minutosReales?: number;
-  }): Promise<boolean> {
-    setMessage("");
-    setUpdatingPastMeetingId(input.eventoId);
-    try {
-      const response = await updatePastMeetingApi({
-        eventoId: input.eventoId,
-        programaNombre: input.programaNombre,
-        monitorEmail: input.monitorEmail,
-        minutosReales: input.minutosReales
-      });
-      if (!response.success) {
-        setMessage(response.error ?? "No se pudo actualizar la reunion.");
-        return false;
-      }
-
-      const meetings = await loadPastMeetings();
-      if (!meetings) {
-        setMessage("Reunion actualizada, pero no se pudo refrescar la lista.");
-        return true;
-      }
-      setPastMeetings(meetings);
-      setMessage("Reunion actualizada correctamente.");
-      return true;
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : "No se pudo actualizar la reunion.");
-      return false;
-    } finally {
-      setUpdatingPastMeetingId(null);
-    }
-  }
-
-  async function submitPastMeeting(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    setMessage("");
-    setIsSubmittingPastMeeting(true);
-    try {
-      const normalizedPrograma = pastMeetingForm.programaNombre.trim();
-      if (!normalizedPrograma) {
-        setMessage("Programa es obligatorio.");
-        return;
-      }
-
-      const normalizedDocenteEmail = pastMeetingForm.docenteEmail.trim().toLowerCase();
-      if (!normalizedDocenteEmail) {
-        setMessage("Debes seleccionar el docente.");
-        return;
-      }
-      const docenteOption = docenteOptions.find((option) => option.value === normalizedDocenteEmail);
-      if (!docenteOption) {
-        setMessage("Debes seleccionar un docente valido desde la lista.");
-        return;
-      }
-      const normalizedResponsableEmail = pastMeetingForm.responsableEmail.trim().toLowerCase();
-      if (!normalizedResponsableEmail) {
-        setMessage("Debes seleccionar la persona responsable.");
-        return;
-      }
-      const responsableOption = docenteOptions.find(
-        (option) => option.value === normalizedResponsableEmail
-      );
-      if (!responsableOption) {
-        setMessage("Debes seleccionar una persona responsable valida desde la lista.");
-        return;
-      }
-      const normalizedMonitorEmail = pastMeetingForm.monitorEmail.trim().toLowerCase();
-      if (!normalizedMonitorEmail) {
-        setMessage("Debes asignar un Asistente Zoom para registrar la reunion pasada.");
-        return;
-      }
-      const monitorOption = monitorOptions.find((option) => option.value === normalizedMonitorEmail);
-      if (!monitorOption) {
-        setMessage("Debes seleccionar un Asistente Zoom valido desde la lista.");
-        return;
-      }
-      const lockedTitle = pastMeetingZoomSeed?.topic?.trim() || pastMeetingForm.titulo.trim();
-      const lockedMeetingId = pastMeetingZoomSeed?.meetingId?.trim() || pastMeetingForm.zoomMeetingId.trim();
-      const lockedStartIso = pastMeetingZoomSeed?.startTime
-        ? new Date(pastMeetingZoomSeed.startTime).toISOString()
-        : new Date(pastMeetingForm.inicioRealAt).toISOString();
-      const lockedEndIso = pastMeetingZoomSeed?.endTime
-        ? new Date(pastMeetingZoomSeed.endTime).toISOString()
-        : new Date(pastMeetingForm.finRealAt).toISOString();
-      const lockedJoinUrl =
-        (pastMeetingZoomSeed?.joinUrl?.trim() || "") || pastMeetingForm.zoomJoinUrl.trim() || undefined;
-
-      const response = await submitPastMeetingApi({
-        titulo: lockedTitle,
-        modalidadReunion: pastMeetingForm.modalidadReunion,
-        docenteEmail: normalizedDocenteEmail,
-        monitorEmail: normalizedMonitorEmail,
-        zoomMeetingId: lockedMeetingId || undefined,
-        inicioRealAt: lockedStartIso,
-        finRealAt: lockedEndIso,
-        programaNombre: normalizedPrograma,
-        responsableEmail: normalizedResponsableEmail,
-        descripcion: pastMeetingForm.descripcion.trim() || undefined,
-        zoomJoinUrl: lockedJoinUrl
-      });
-
-      if (!response.success) {
-        setMessage(response.error ?? "No se pudo registrar la reunion pasada.");
-        return;
-      }
-
-      setPastMeetingForm({
-        titulo: "",
-        modalidadReunion: "VIRTUAL",
-        docenteEmail: "",
-        responsableEmail: "",
-        monitorEmail: "",
-        zoomMeetingId: "",
-        inicioRealAt: "",
-        finRealAt: "",
-        programaNombre: "",
-        descripcion: "",
-        zoomJoinUrl: ""
-      });
-      setPastMeetingZoomSeed(null);
-      setMessage(`Reunion registrada correctamente: ${response.solicitudId ?? ""}`);
-      const [solicitudesData, summaryData, meetingsData] = await Promise.all([
-        loadSolicitudes(),
-        loadSummary(buildSummaryLoadOptions()),
-        loadPastMeetings()
-      ]);
-      if (solicitudesData) setSolicitudes(solicitudesData);
-      if (summaryData) setSummary(summaryData);
-      if (meetingsData) setPastMeetings(meetingsData);
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : "No se pudo registrar la reunion pasada.");
-    } finally {
-      setIsSubmittingPastMeeting(false);
-    }
-  }
-
-  async function createProgramaOnDemand(nombre: string): Promise<string | null> {
-    setIsCreatingPrograma(true);
-    try {
-      const response = await createProgramaApi(nombre);
-      if (!response.success || !response.programa) {
-        setMessage(response.error ?? "No se pudo crear el programa.");
-        return null;
-      }
-
-      setProgramas((prev) => {
-        const exists = prev.some((item) => item.id === response.programa?.id);
-        const next = exists ? prev : [...prev, response.programa as Programa];
-        return [...next].sort((a, b) => a.nombre.localeCompare(b.nombre, "es"));
-      });
-      setMessage(`Programa listo: ${response.programa.nombre}`);
-      return response.programa.nombre;
-    } finally {
-      setIsCreatingPrograma(false);
-    }
-  }
-
-  async function refreshProgramasView() {
-    setIsRefreshingProgramas(true);
-    try {
-      const [loadedProgramas, loadedSolicitudes] = await Promise.all([
-        loadProgramas(),
-        loadSolicitudes()
-      ]);
-      if (loadedProgramas) setProgramas(loadedProgramas);
-      if (loadedSolicitudes) setSolicitudes(loadedSolicitudes);
-      if (!loadedProgramas && !loadedSolicitudes) {
-        setMessage("No se pudo actualizar la vista de programas.");
-      }
-    } finally {
-      setIsRefreshingProgramas(false);
-    }
-  }
-
   const solicitudesTabProps: Omit<
     ComponentProps<typeof SpaTabSolicitudes>,
     "docenteSolicitudesView" | "setDocenteSolicitudesView"
@@ -2560,66 +1114,8 @@ export function SpaHomeScreen() {
           onLinkGoogleAccount={linkGoogleAccount}
           onUnlinkGoogleAccount={unlinkGoogleAccount}
           onSyncProfileFromGoogle={syncProfileFromGoogle}
-          onSubmitPassword={async (e) => {
-            e.preventDefault();
-            if (passwordForm.newPassword !== passwordForm.confirmPassword) {
-              setMessage("Las contraseñas no coinciden.");
-              return;
-            }
-            setIsUpdatingPassword(true);
-            setMessage("");
-            try {
-              const result = await updatePasswordApi(passwordForm.newPassword);
-              if (!result.success) {
-                setMessage(result.error ?? "No se pudo actualizar la contraseña.");
-                return;
-              }
-              setHasPassword(true);
-              setMessage("Contraseña establecida correctamente. Ya puedes ingresar con tu email.");
-              setShowPasswordForm(false);
-              setPasswordForm({ newPassword: "", confirmPassword: "" });
-            } catch (error) {
-              setMessage(error instanceof Error ? error.message : "Error al actualizar contraseña.");
-            } finally {
-              setIsUpdatingPassword(false);
-            }
-          }}
-          onSubmit={async (e) => {
-            e.preventDefault();
-            setIsUpdatingProfile(true);
-            setMessage("");
-            try {
-              const response = await fetch("/api/v1/auth/profile", {
-                method: "PUT",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                  firstName: profileForm.firstName,
-                  lastName: profileForm.lastName,
-                  image: profileForm.image
-                })
-              });
-              const data =
-                (await readJsonSafe<{ error?: string; user?: CurrentUser }>(response)) ?? {};
-              if (!response.ok) {
-                setMessage(data.error ?? "No se pudo actualizar el perfil.");
-                return;
-              }
-              if (data.user) {
-                setUser(data.user);
-                setProfileForm({
-                  firstName: data.user.firstName ?? "",
-                  lastName: data.user.lastName ?? "",
-                  image: data.user.image ?? ""
-                });
-              }
-              setMessage("Perfil actualizado correctamente.");
-              setShowProfileForm(false);
-            } catch (error) {
-              setMessage(error instanceof Error ? error.message : "Error al actualizar perfil.");
-            } finally {
-              setIsUpdatingProfile(false);
-            }
-          }}
+          onSubmitPassword={submitPassword}
+          onSubmit={submitProfile}
         />
       )}
       <SpaSnackbar message={message} onClose={() => setMessage("")} />

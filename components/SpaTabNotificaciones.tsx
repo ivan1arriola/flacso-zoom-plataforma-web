@@ -7,7 +7,6 @@ import {
   Button,
   Card,
   CardContent,
-  Chip,
   IconButton,
   Paper,
   Stack,
@@ -15,204 +14,32 @@ import {
   ToggleButtonGroup,
   Typography,
   Pagination,
-  CircularProgress,
-  Tooltip
+  CircularProgress
 } from "@mui/material";
 import RefreshIcon from "@mui/icons-material/Refresh";
-import DeleteOutlineIcon from "@mui/icons-material/DeleteOutline";
 import MarkEmailReadOutlinedIcon from "@mui/icons-material/MarkEmailReadOutlined";
-import MarkEmailUnreadOutlinedIcon from "@mui/icons-material/MarkEmailUnreadOutlined";
 import NotificationsActiveOutlinedIcon from "@mui/icons-material/NotificationsActiveOutlined";
-import EmailOutlinedIcon from "@mui/icons-material/EmailOutlined";
-import WarningAmberOutlinedIcon from "@mui/icons-material/WarningAmberOutlined";
 import AccessTimeIcon from "@mui/icons-material/AccessTime";
-import ChevronRightIcon from "@mui/icons-material/ChevronRight";
-import LaunchIcon from "@mui/icons-material/Launch";
 
 import { usePushNotifications } from "@/src/hooks/usePushNotifications";
 import { SolicitudDetailDialog } from "@/components/spa-tabs/SolicitudDetailDialog";
+import { NotificationItem } from "@/components/notificaciones/NotificationItem";
+import type {
+  Notificacion,
+  NotificacionesResponse,
+  NotificationActivityFilter,
+  NotificationOrder,
+  NotificationReadFilter,
+  NotificationScope,
+  NotificationStatusFilter,
+  NotificationTypeFilter,
+  PaginationInfo,
+  SpaTabNotificacionesProps
+} from "@/components/notificaciones/types";
 import {
-  NOTIF_ACTIVITY_LOGIN,
-  NOTIF_ACTIVITY_ZOOM_RECORDING_WEBHOOK
-} from "@/src/lib/notification-activity";
-
-type NotificationScope = "mine" | "all";
-type NotificationReadFilter = "TODAS" | "LEIDAS" | "NO_LEIDAS";
-type NotificationOrder = "asc" | "desc";
-type NotificationActivityFilter = "TODAS" | "LOGIN" | "ZOOM_RECORDING";
-
-interface NotificacionUsuario {
-  id: string;
-  email: string;
-  name: string | null;
-  firstName: string | null;
-  lastName: string | null;
-}
-
-interface Notificacion {
-  id: string;
-  usuarioId: string;
-  tipoNotificacion: "EMAIL" | "IN_APP" | "ALERTA_OPERATIVA";
-  canalDestino: string;
-  asunto: string;
-  cuerpo: string;
-  estadoEnvio: "PENDIENTE" | "ENVIADA" | "FALLIDA";
-  intentoCount: number;
-  ultimoIntentoAt: string | null;
-  entidadReferenciaTipo: string | null;
-  entidadReferenciaId: string | null;
-  leidaAt: string | null;
-  createdAt: string;
-  updatedAt: string;
-  usuario: NotificacionUsuario;
-}
-
-interface PaginationInfo {
-  page: number;
-  limit: number;
-  total: number;
-  pages: number;
-}
-
-interface NotificacionesResponse {
-  scope: NotificationScope;
-  orden: NotificationOrder;
-  actividad?: NotificationActivityFilter;
-  notificaciones: Notificacion[];
-  unreadCount: number;
-  pagination: PaginationInfo;
-}
-
-type SpaTabNotificacionesProps = {
-  isAdmin: boolean;
-};
-
-function getTipoIcon(tipo: Notificacion["tipoNotificacion"]) {
-  switch (tipo) {
-    case "EMAIL":
-      return <EmailOutlinedIcon fontSize="small" color="primary" />;
-    case "IN_APP":
-      return <NotificationsActiveOutlinedIcon fontSize="small" color="info" />;
-    case "ALERTA_OPERATIVA":
-      return <WarningAmberOutlinedIcon fontSize="small" color="warning" />;
-    default:
-      return <NotificationsActiveOutlinedIcon fontSize="small" />;
-  }
-}
-
-function getTipoLabel(tipo: Notificacion["tipoNotificacion"]): string {
-  switch (tipo) {
-    case "EMAIL":
-      return "Email";
-    case "ALERTA_OPERATIVA":
-      return "Alerta";
-    case "IN_APP":
-    default:
-      return "In-App";
-  }
-}
-
-type NotificationBodyField = {
-  label: string;
-  value: string;
-};
-
-function isLoginNotification(notif: Notificacion): boolean {
-  if (notif.entidadReferenciaTipo === NOTIF_ACTIVITY_LOGIN) return true;
-  return /inicio de sesion/i.test(notif.asunto);
-}
-
-function isAssistantInterestNotification(notif: Notificacion): boolean {
-  return /interes asistente actualizado/i.test(notif.asunto);
-}
-
-function isZoomRecordingWebhookNotification(notif: Notificacion): boolean {
-  if (notif.entidadReferenciaTipo === NOTIF_ACTIVITY_ZOOM_RECORDING_WEBHOOK) return true;
-  return /^Zoom Recording:/i.test(notif.asunto);
-}
-
-function splitNotificationBody(body: string): {
-  intro: string;
-  fields: NotificationBodyField[];
-} {
-  const lines = body
-    .split("\n")
-    .map((line) => line.trim())
-    .filter(Boolean);
-  if (lines.length === 0) {
-    return { intro: "", fields: [] };
-  }
-
-  const [intro, ...details] = lines;
-  const fields = details.reduce<NotificationBodyField[]>((acc, line) => {
-    const separatorIndex = line.indexOf(":");
-    if (separatorIndex <= 0) return acc;
-    const label = line.slice(0, separatorIndex).replace(/^-+\s*/, "").trim();
-    const value = line.slice(separatorIndex + 1).trim();
-    if (!label || !value) return acc;
-    acc.push({ label, value });
-    return acc;
-  }, []);
-
-  return { intro, fields };
-}
-
-function getFieldValue(fields: NotificationBodyField[], label: string): string | null {
-  const normalizedLabel = label.trim().toLowerCase();
-  const match = fields.find((field) => field.label.trim().toLowerCase() === normalizedLabel);
-  return match?.value ?? null;
-}
-
-function getFieldValueAny(fields: NotificationBodyField[], labels: string[]): string | null {
-  for (const label of labels) {
-    const value = getFieldValue(fields, label);
-    if (value) return value;
-  }
-  return null;
-}
-
-function truncateText(value: string, maxLength: number): string {
-  if (value.length <= maxLength) return value;
-  return `${value.slice(0, maxLength - 1)}…`;
-}
-
-function getUserDisplay(usuario: NotificacionUsuario): string {
-  if (usuario.name) return usuario.name;
-  if (usuario.firstName || usuario.lastName) {
-    return `${usuario.firstName ?? ""} ${usuario.lastName ?? ""}`.trim();
-  }
-  return usuario.email;
-}
-
-function formatTime(dateString: string): string {
-  return new Intl.DateTimeFormat("es-UY", {
-    hour: "2-digit",
-    minute: "2-digit"
-  }).format(new Date(dateString));
-}
-
-function getDateGroupLabel(dateString: string): string {
-  const d = new Date(dateString);
-  const now = new Date();
-  
-  const diffTime = now.getTime() - d.getTime();
-  const diffDays = Math.floor(diffTime / (1000 * 60 * 60 * 24));
-
-  const isToday = d.getDate() === now.getDate() && 
-                  d.getMonth() === now.getMonth() && 
-                  d.getFullYear() === now.getFullYear();
-                  
-  const yesterday = new Date(now);
-  yesterday.setDate(now.getDate() - 1);
-  const isYesterday = d.getDate() === yesterday.getDate() && 
-                      d.getMonth() === yesterday.getMonth() && 
-                      d.getFullYear() === yesterday.getFullYear();
-
-  if (isToday) return "Hoy";
-  if (isYesterday) return "Ayer";
-  if (diffDays < 7) return "Esta semana";
-  return "Anteriores";
-}
+  groupNotificationsByDate,
+  NOTIFICATION_GROUP_ORDER
+} from "@/components/notificaciones/utils";
 
 export function SpaTabNotificaciones({ isAdmin }: SpaTabNotificacionesProps) {
   const [notificaciones, setNotificaciones] = useState<Notificacion[]>([]);
@@ -228,9 +55,9 @@ export function SpaTabNotificaciones({ isAdmin }: SpaTabNotificacionesProps) {
   const [scope, setScope] = useState<NotificationScope>("mine");
   const [lecturaFiltro, setLecturaFiltro] = useState<NotificationReadFilter>("TODAS");
   const [ordenFiltro, setOrdenFiltro] = useState<NotificationOrder>("desc");
-  const [tipoFiltro, setTipoFiltro] = useState<"" | "EMAIL" | "IN_APP" | "ALERTA_OPERATIVA">("");
+  const [tipoFiltro, setTipoFiltro] = useState<NotificationTypeFilter>("");
   const [actividadFiltro, setActividadFiltro] = useState<NotificationActivityFilter>("TODAS");
-  const [estadoFiltro, setEstadoFiltro] = useState<"" | "PENDIENTE" | "ENVIADA" | "FALLIDA">("");
+  const [estadoFiltro, setEstadoFiltro] = useState<NotificationStatusFilter>("");
   const [error, setError] = useState("");
   const [isTestingPush, setIsTestingPush] = useState(false);
   const [pushTestMessage, setPushTestMessage] = useState("");
@@ -418,17 +245,7 @@ export function SpaTabNotificaciones({ isAdmin }: SpaTabNotificacionesProps) {
     [notificaciones]
   );
 
-  const groupedNotificaciones = useMemo(() => {
-    const groups: Record<string, Notificacion[]> = {};
-    notificaciones.forEach(notif => {
-      const label = getDateGroupLabel(notif.createdAt);
-      if (!groups[label]) groups[label] = [];
-      groups[label].push(notif);
-    });
-    return groups;
-  }, [notificaciones]);
-
-  const groupOrder = ["Hoy", "Ayer", "Esta semana", "Anteriores"];
+  const groupedNotificaciones = useMemo(() => groupNotificationsByDate(notificaciones), [notificaciones]);
 
   return (
     <Card variant="outlined" sx={{ borderRadius: 3.5, border: "none", backgroundColor: "transparent" }}>
@@ -671,7 +488,7 @@ export function SpaTabNotificaciones({ isAdmin }: SpaTabNotificacionesProps) {
                 fullWidth
                 value={tipoFiltro}
                 exclusive
-                onChange={(_event, value: "" | "EMAIL" | "IN_APP" | "ALERTA_OPERATIVA" | null) => {
+                onChange={(_event, value: NotificationTypeFilter | null) => {
                   if (value === null) return;
                   setTipoFiltro(value);
                 }}
@@ -830,7 +647,7 @@ export function SpaTabNotificaciones({ isAdmin }: SpaTabNotificacionesProps) {
           </Box>
         ) : (
           <Box sx={{ px: { xs: 0, sm: 2 }, pb: 4 }}>
-            {groupOrder.map((group) => {
+            {NOTIFICATION_GROUP_ORDER.map((group) => {
               const groupNotifs = groupedNotificaciones[group];
               if (!groupNotifs || groupNotifs.length === 0) return null;
 
@@ -851,294 +668,17 @@ export function SpaTabNotificaciones({ isAdmin }: SpaTabNotificacionesProps) {
                     {group}
                   </Typography>
                   <Stack spacing={1}>
-                    {groupNotifs.map((notif) => {
-                      const loginNotification = isLoginNotification(notif);
-                      const assistantInterestNotification = isAssistantInterestNotification(notif);
-                      const zoomRecordingNotification = isZoomRecordingWebhookNotification(notif);
-                      const parsedBody = splitNotificationBody(notif.cuerpo);
-                      const usuarioValue = getFieldValue(parsedBody.fields, "Usuario");
-                      const dispositivoValue = getFieldValue(parsedBody.fields, "Dispositivo");
-                      const proveedorValue = getFieldValue(parsedBody.fields, "Proveedor");
-                      const ipValue = getFieldValue(parsedBody.fields, "IP");
-                      const userAgentValue = getFieldValue(parsedBody.fields, "User-Agent");
-                      const assistantName =
-                        getFieldValueAny(parsedBody.fields, ["Asistente", "Asistente nombre", "Actor"]) ??
-                        parsedBody.intro;
-                      const interestValue = getFieldValueAny(parsedBody.fields, [
-                        "Interes marcado",
-                        "Estado interes",
-                        "EstadoInteres",
-                        "Interes"
-                      ]);
-                      const meetingTitle = getFieldValueAny(parsedBody.fields, [
-                        "Reunion",
-                        "Titulo reunion",
-                        "Titulo",
-                        "Entidad"
-                      ]);
-                      const meetingDate = getFieldValueAny(parsedBody.fields, [
-                        "Dia y hora",
-                        "Fecha reunion",
-                        "Fecha y hora",
-                        "Fecha"
-                      ]);
-
-                      return (
-                        <Paper
-                          key={notif.id}
-                          variant="outlined"
-                          sx={{
-                            p: 2,
-                            borderRadius: 3,
-                            position: "relative",
-                            backgroundColor: "background.paper",
-                            borderColor: notif.leidaAt ? "divider" : "rgba(31, 75, 143, 0.2)",
-                            borderWidth: notif.leidaAt ? "1px" : "1.5px",
-                            boxShadow: notif.leidaAt ? "none" : "0 4px 12px rgba(31, 75, 143, 0.05)",
-                            transition: "all 0.2s ease",
-                            "&:hover": {
-                              borderColor: "primary.main",
-                              transform: "translateY(-2px)",
-                              boxShadow: "0 6px 20px rgba(0,0,0,0.06)",
-                              "& .action-buttons": { opacity: 1 }
-                            }
-                          }}
-                        >
-                          {!notif.leidaAt && (
-                            <Box
-                              sx={{
-                                position: "absolute",
-                                top: 22,
-                                left: 10,
-                                width: 8,
-                                height: 8,
-                                borderRadius: "50%",
-                                backgroundColor: "#3b82f6",
-                                boxShadow: "0 0 0 4px rgba(59, 130, 246, 0.1)"
-                              }}
-                            />
-                          )}
-
-                          <Stack direction="row" spacing={2} alignItems="flex-start">
-                            <Box
-                              sx={{
-                                width: 40,
-                                height: 40,
-                                borderRadius: "10px",
-                                backgroundColor: notif.leidaAt ? "grey.50" : "rgba(31, 75, 143, 0.05)",
-                                display: "flex",
-                                alignItems: "center",
-                                justifyContent: "center",
-                                flexShrink: 0,
-                                mt: 0.5
-                              }}
-                            >
-                              {getTipoIcon(notif.tipoNotificacion)}
-                            </Box>
-
-                            <Box sx={{ flex: 1, minWidth: 0 }}>
-                              <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 0.5 }}>
-                                <Typography
-                                  variant="body1"
-                                  sx={{
-                                    fontWeight: notif.leidaAt ? 600 : 800,
-                                    color: notif.leidaAt ? "text.primary" : "primary.main",
-                                    lineHeight: 1.3
-                                  }}
-                                >
-                                  {notif.asunto}
-                                </Typography>
-                                <Typography variant="caption" sx={{ color: "text.secondary", fontWeight: 600, whiteSpace: "nowrap", ml: 2 }}>
-                                  {formatTime(notif.createdAt)}
-                                </Typography>
-                              </Stack>
-
-                              {loginNotification ? (
-                                <Box sx={{ mb: 1 }}>
-                                  {parsedBody.intro ? (
-                                    <Typography
-                                      variant="body2"
-                                      color="text.secondary"
-                                      sx={{ mb: 1, fontSize: "0.875rem", opacity: notif.leidaAt ? 0.75 : 0.9 }}
-                                    >
-                                      {parsedBody.intro}
-                                    </Typography>
-                                  ) : null}
-                                  <Stack direction="row" spacing={0.75} useFlexGap flexWrap="wrap" sx={{ mb: userAgentValue ? 0.5 : 0 }}>
-                                    {usuarioValue ? <Chip size="small" label={`Usuario: ${usuarioValue}`} variant="outlined" /> : null}
-                                    {dispositivoValue ? <Chip size="small" label={`Dispositivo: ${dispositivoValue}`} variant="outlined" /> : null}
-                                    {proveedorValue ? <Chip size="small" label={`Proveedor: ${proveedorValue}`} variant="outlined" /> : null}
-                                    {ipValue ? <Chip size="small" label={`IP: ${ipValue}`} variant="outlined" /> : null}
-                                  </Stack>
-                                  {userAgentValue ? (
-                                    <Tooltip title={userAgentValue}>
-                                      <Typography
-                                        variant="caption"
-                                        color="text.secondary"
-                                        sx={{ display: "block", fontFamily: "monospace", opacity: 0.75 }}
-                                      >
-                                        User-Agent: {truncateText(userAgentValue, 110)}
-                                      </Typography>
-                                    </Tooltip>
-                                  ) : null}
-                                </Box>
-                              ) : assistantInterestNotification ? (
-                                <Box sx={{ mb: 1 }}>
-                                  <Typography
-                                    variant="body2"
-                                    color="text.secondary"
-                                    sx={{ mb: 0.6, fontSize: "0.9rem", fontWeight: 700 }}
-                                  >
-                                    {assistantName || "Asistente"}{interestValue ? ` marco "${interestValue}".` : " actualizo su interes."}
-                                  </Typography>
-                                  <Stack direction="row" spacing={0.75} useFlexGap flexWrap="wrap">
-                                    {meetingTitle ? <Chip size="small" label={`Reunion: ${meetingTitle}`} variant="outlined" /> : null}
-                                    {meetingDate ? <Chip size="small" label={`Dia: ${meetingDate}`} variant="outlined" /> : null}
-                                  </Stack>
-                                </Box>
-                              ) : (
-                                <Typography
-                                  variant="body2"
-                                  color="text.secondary"
-                                  sx={{
-                                    whiteSpace: "pre-wrap",
-                                    mb: 1,
-                                    fontSize: "0.875rem",
-                                    lineHeight: 1.5,
-                                    opacity: notif.leidaAt ? 0.7 : 0.9
-                                  }}
-                                >
-                                  {notif.cuerpo}
-                                </Typography>
-                              )}
-
-                              <Stack direction="row" spacing={1} alignItems="center" useFlexGap flexWrap="wrap">
-                                {scope === "all" && (
-                                  <Typography variant="caption" sx={{ fontWeight: 700, color: "text.primary" }}>
-                                    Para: {getUserDisplay(notif.usuario)}
-                                  </Typography>
-                                )}
-                                <Chip
-                                  size="small"
-                                  label={getTipoLabel(notif.tipoNotificacion)}
-                                  variant="outlined"
-                                  sx={{
-                                    height: 20,
-                                    fontSize: "0.65rem",
-                                    fontWeight: 800,
-                                    textTransform: "uppercase",
-                                    borderColor: "divider",
-                                    color: "text.secondary"
-                                  }}
-                                />
-                                {loginNotification ? (
-                                  <Chip
-                                    size="small"
-                                    label="Inicio sesión"
-                                    color="info"
-                                    variant="outlined"
-                                    sx={{
-                                      height: 20,
-                                      fontSize: "0.65rem",
-                                      fontWeight: 800
-                                    }}
-                                  />
-                                ) : null}
-                                {assistantInterestNotification ? (
-                                  <Chip
-                                    size="small"
-                                    label="Interes asistente"
-                                    color="warning"
-                                    variant="outlined"
-                                    sx={{
-                                      height: 20,
-                                      fontSize: "0.65rem",
-                                      fontWeight: 800
-                                    }}
-                                  />
-                                ) : null}
-                                {zoomRecordingNotification ? (
-                                  <Chip
-                                    size="small"
-                                    label="Grabaciones Zoom"
-                                    color="secondary"
-                                    variant="outlined"
-                                    sx={{
-                                      height: 20,
-                                      fontSize: "0.65rem",
-                                      fontWeight: 800
-                                    }}
-                                  />
-                                ) : null}
-                                {notif.entidadReferenciaTipo === "SolicitudSala" && notif.entidadReferenciaId && (
-                                  <Button
-                                    size="small"
-                                    variant="text"
-                                    startIcon={<LaunchIcon fontSize="inherit" />}
-                                    onClick={() => openDetail(notif.entidadReferenciaId!)}
-                                    sx={{
-                                      height: 20,
-                                      fontSize: "0.65rem",
-                                      fontWeight: 800,
-                                      textTransform: "none",
-                                      color: "primary.main",
-                                      p: 0,
-                                      minWidth: 0,
-                                      "&:hover": { backgroundColor: "transparent", textDecoration: "underline" }
-                                    }}
-                                  >
-                                    Ver pedido
-                                  </Button>
-                                )}
-                              </Stack>
-                            </Box>
-
-                            <Stack
-                              className="action-buttons"
-                              direction="row"
-                              spacing={0.5}
-                              sx={{
-                                opacity: { xs: 1, md: 0 },
-                                transition: "opacity 0.2s ease",
-                                alignItems: "center"
-                              }}
-                            >
-                              <Tooltip title={notif.leidaAt ? "Marcar como sin leer" : "Marcar como leída"}>
-                                <IconButton
-                                  size="small"
-                                  onClick={() => {
-                                    void markAsRead([notif.id], !notif.leidaAt);
-                                  }}
-                                  disabled={isMutating}
-                                  sx={{ color: "text.secondary", "&:hover": { color: "primary.main" } }}
-                                >
-                                  {notif.leidaAt ? (
-                                    <MarkEmailUnreadOutlinedIcon fontSize="small" />
-                                  ) : (
-                                    <MarkEmailReadOutlinedIcon fontSize="small" />
-                                  )}
-                                </IconButton>
-                              </Tooltip>
-
-                              <Tooltip title="Borrar">
-                                <IconButton
-                                  size="small"
-                                  onClick={() => {
-                                    void deleteNotificaciones([notif.id]);
-                                  }}
-                                  disabled={isMutating}
-                                  sx={{ color: "text.secondary", "&:hover": { color: "error.main" } }}
-                                >
-                                  <DeleteOutlineIcon fontSize="small" />
-                                </IconButton>
-                              </Tooltip>
-
-                              <ChevronRightIcon sx={{ color: "grey.300", ml: 0.5, display: { xs: "none", sm: "block" } }} />
-                            </Stack>
-                          </Stack>
-                        </Paper>
-                      );
-                    })}
+                    {groupNotifs.map((notif) => (
+                      <NotificationItem
+                        key={notif.id}
+                        notif={notif}
+                        scope={scope}
+                        isMutating={isMutating}
+                        onMarkAsRead={markAsRead}
+                        onDelete={deleteNotificaciones}
+                        onOpenDetail={openDetail}
+                      />
+                    ))}
                   </Stack>
                 </Box>
               );

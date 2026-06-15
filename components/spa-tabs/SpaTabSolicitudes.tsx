@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import ExpandLessIcon from "@mui/icons-material/ExpandLess";
 import ExpandMoreIcon from "@mui/icons-material/ExpandMore";
 import LaunchIcon from "@mui/icons-material/Launch";
@@ -43,8 +43,7 @@ import {
   Stack,
   TextField,
   InputAdornment,
-  Typography,
-  Skeleton
+  Typography
 } from "@mui/material";
 import { useTheme } from "@mui/material/styles";
 import { ToggleButtons } from "@/components/toggle-buttons";
@@ -63,471 +62,37 @@ import { parseSpecificDatesInput } from "@/components/spa-tabs/solicitud-payload
 import { MeetingAssistantStatusChip } from "@/components/spa-tabs/MeetingAssistantStatusChip";
 import { ZoomAccountPasswordField } from "@/components/spa-tabs/ZoomAccountPasswordField";
 import { SolicitudDetailDialog } from "@/components/spa-tabs/SolicitudDetailDialog";
-
-interface SpaTabSolicitudesProps {
-  solicitudes: Solicitud[];
-  form: SolicitudFormState;
-  updateForm: <K extends keyof SolicitudFormState>(key: K, value: SolicitudFormState[K]) => void;
-  onDeleteSolicitud: (solicitudId: string) => void;
-  deletingSolicitudId: string | null;
-  onCancelSolicitudSerie: (solicitudId: string, titulo: string) => void;
-  cancellingSerieSolicitudId: string | null;
-  onCancelSolicitudInstancia: (input: {
-    solicitudId: string;
-    titulo: string;
-    eventoId?: string | null;
-    occurrenceId?: string | null;
-    startTime: string;
-  }) => void;
-  cancellingInstanciaKey: string | null;
-  onRestoreSolicitudInstancia: (input: {
-    solicitudId: string;
-    titulo: string;
-    eventoId?: string | null;
-    startTime: string;
-  }) => void;
-  restoringInstanciaKey: string | null;
-  canAddInstances: boolean;
-  addingInstanceSolicitudId: string | null;
-  onAddInstance: (input: {
-    solicitudId: string;
-    titulo: string;
-    inicioProgramadoAt: string;
-    finProgramadoAt: string;
-  }) => Promise<boolean>;
-  canSendReminder: boolean;
-  sendingReminderSolicitudId: string | null;
-  onSendReminder: (input: {
-    solicitudId: string;
-    toEmail?: string;
-    mensaje?: string;
-  }) => Promise<boolean>;
-  canEditMeeting: boolean;
-  onEditMeeting: (input: {
-    solicitudId: string;
-    eventoId: string;
-    titulo: string;
-    programaNombre: string;
-    responsableNombre?: string;
-    docenteCreadorNombre?: string;
-    isRecurring?: boolean;
-    inicioProgramadoAt?: string;
-    finProgramadoAt?: string;
-    modalidadReunion?: string;
-    targetOccurrenceId?: string;
-    targetPreviousStart?: string;
-  }) => Promise<boolean>;
-  canEditMeetingDuration: boolean;
-  updatingMeetingDurationEventId: string | null;
-  onEditMeetingDuration: (input: {
-    eventoId: string;
-    titulo: string;
-    inicioProgramadoAt: string;
-    minutosReales: number;
-  }) => Promise<boolean>;
-  canReassignRecurringSolicitud: boolean;
-  onReassignRecurringSolicitud: (input: {
-    solicitudId: string;
-    titulo: string;
-    responsableNombre: string;
-    docenteCreadorNombre: string;
-  }) => Promise<boolean>;
-  canEditAssistance: boolean;
-  updatingAssistanceSolicitudId: string | null;
-  updatingAssistanceInstanceKey: string | null;
-  onEnableAssistance: (input: {
-    solicitudId: string;
-    titulo: string;
-    requiereAsistencia: boolean;
-  }) => void;
-  onToggleAssistanceForInstance: (input: {
-    solicitudId: string;
-    titulo: string;
-    eventoId?: string | null;
-    startTime: string;
-    requiereAsistencia: boolean;
-  }) => void;
-  canDeleteSolicitud: boolean;
-  canRestoreInstances: boolean;
-  isSubmittingSolicitud: boolean;
-  canCreateShortcut: boolean;
-  canDelegateResponsable: boolean;
-  responsableOptions: Array<{ value: string; label: string }>;
-  docenteLinkedEmailOptions: string[];
-  programaOptions: string[];
-  isCreatingPrograma: boolean;
-  onCreatePrograma: (nombre: string) => Promise<string | null>;
-  docenteSolicitudesView: "form" | "list";
-  setDocenteSolicitudesView: (view: "form" | "list") => void;
-  viewerRole?: string;
-  onSubmit: (event: FormEvent<HTMLFormElement>) => void;
-  isLoading?: boolean;
-}
-
-const CREATE_PROGRAMA_VALUE = "__create_programa__";
-type SolicitudesListScope = "ACTIVAS" | "FINALIZADAS";
-type SolicitudesSortMode = "PROXIMA_INSTANCIA" | "FECHA_SOLICITUD";
-type EditMeetingDialogState = {
-  id: string;
-  titulo: string;
-  eventoId: string;
-  isRecurring: boolean;
-  selectedInstanceLabel: string;
-  targetOccurrenceId?: string;
-  targetPreviousStart?: string;
-};
-
-type EditMeetingDurationDialogState = {
-  eventoId: string;
-  titulo: string;
-  inicioProgramadoAt: string;
-  fechaLabel: string;
-  minutosProgramados: number;
-  minutosRealesActuales?: number | null;
-};
-
-type EditMeetingFormState = {
-  titulo: string;
-  programaNombre: string;
-  responsableNombre: string;
-  docenteCreadorNombre: string;
-  modalidadReunion: string;
-  inicioProgramadoAt: string;
-  finProgramadoAt: string;
-};
-
-function buildEmptyEditMeetingForm(): EditMeetingFormState {
-  return {
-    titulo: "",
-    programaNombre: "",
-    responsableNombre: "",
-    docenteCreadorNombre: "",
-    modalidadReunion: "VIRTUAL",
-    inicioProgramadoAt: "",
-    finProgramadoAt: ""
-  };
-}
-
-const zoomWeekdayOptionsFull: Array<{ value: string; label: string }> = [
-  { value: "1", label: "Domingo" },
-  { value: "2", label: "Lunes" },
-  { value: "3", label: "Martes" },
-  { value: "4", label: "Miercoles" },
-  { value: "5", label: "Jueves" },
-  { value: "6", label: "Viernes" },
-  { value: "7", label: "Sabado" }
-];
-
-const ZOOM_ACCOUNT_COLOR_PALETTE = [
-  "#0D9488",
-  "#0284C7",
-  "#2563EB",
-  "#1D4ED8",
-  "#0F766E",
-  "#15803D",
-  "#65A30D",
-  "#CA8A04",
-  "#EA580C",
-  "#DC2626",
-  "#BE185D",
-  "#C2410C",
-  "#6D28D9",
-  "#5B21B6",
-  "#334155",
-  "#4D7C0F",
-  "#0369A1",
-  "#7C2D12",
-  "#9F1239",
-  "#166534"
-];
-
-const ADD_INSTANCE_BUSY_MESSAGES = [
-  "Guardando fecha de reunión en el sistema...",
-  "Sincronizando fecha de reunión con Zoom...",
-  "Actualizando datos del pedido..."
-];
-
-function hashLabel(value: string): number {
-  let hash = 0;
-  for (let index = 0; index < value.length; index += 1) {
-    hash = (hash << 5) - hash + value.charCodeAt(index);
-    hash |= 0;
-  }
-  return Math.abs(hash);
-}
-
-function getZoomAccountColor(accountLabel: string): string {
-  const normalized = accountLabel.trim().toLowerCase();
-  if (!normalized || normalized === "-") {
-    return "#64748B";
-  }
-  const paletteIndex = hashLabel(normalized) % ZOOM_ACCOUNT_COLOR_PALETTE.length;
-  return ZOOM_ACCOUNT_COLOR_PALETTE[paletteIndex];
-}
-
-function parseTimeToMinutes(value: string): number | null {
-  const match = /^([01]\d|2[0-3]):([0-5]\d)$/.exec(value);
-  if (!match) return null;
-  return Number(match[1]) * 60 + Number(match[2]);
-}
-
-function parseDurationToMinutes(value: string): number | null {
-  const parsed = Number(value.replace(",", "."));
-  if (!Number.isFinite(parsed) || parsed <= 0) return null;
-  return Math.floor(parsed);
-}
-
-function minutesToTime(value: number): string {
-  if (!Number.isInteger(value) || value < 0 || value >= 24 * 60) return "";
-  const hours = Math.floor(value / 60);
-  const minutes = value % 60;
-  return `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}`;
-}
-
-type SpecificDateDetail = {
-  horaInicio: string;
-  horaFin: string;
-  duracionMinutos?: string;
-};
-
-type SpecificDateDetailMap = Record<string, SpecificDateDetail>;
-
-function parseSpecificDateDetails(rawInput: string): SpecificDateDetailMap {
-  if (!rawInput.trim()) return {};
-  try {
-    const parsed = JSON.parse(rawInput) as unknown;
-    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return {};
-    const result: SpecificDateDetailMap = {};
-    for (const [dateIso, value] of Object.entries(parsed)) {
-      if (!/^\d{4}-\d{2}-\d{2}$/.test(dateIso)) continue;
-      if (!value || typeof value !== "object" || Array.isArray(value)) continue;
-      const horaInicio =
-        typeof (value as { horaInicio?: unknown }).horaInicio === "string"
-          ? (value as { horaInicio: string }).horaInicio.trim()
-          : "";
-      const horaFin =
-        typeof (value as { horaFin?: unknown }).horaFin === "string"
-          ? (value as { horaFin: string }).horaFin.trim()
-          : "";
-      const duracionMinutos =
-        typeof (value as { duracionMinutos?: unknown }).duracionMinutos === "string"
-          ? (value as { duracionMinutos: string }).duracionMinutos.trim()
-          : "";
-      if (!horaInicio) continue;
-      result[dateIso] = {
-        horaInicio,
-        horaFin,
-        duracionMinutos: duracionMinutos || undefined
-      };
-    }
-    return result;
-  } catch {
-    return {};
-  }
-}
-
-function serializeSpecificDateDetails(details: SpecificDateDetailMap): string {
-  const orderedEntries = Object.entries(details)
-    .filter(([dateIso]) => /^\d{4}-\d{2}-\d{2}$/.test(dateIso))
-    .sort((left, right) => left[0].localeCompare(right[0], "es"));
-
-  const normalized: Record<string, SpecificDateDetail> = {};
-  for (const [dateIso, value] of orderedEntries) {
-    normalized[dateIso] = value;
-  }
-  return JSON.stringify(normalized);
-}
-
-function normalizeEmailInputAsLines(value: string): string {
-  return value
-    .replace(/\r\n/g, "\n")
-    .replace(/[;,]+/g, "\n")
-    .replace(/\n[ \t]+/g, "\n");
-}
-
-function toDateTimeLocalInput(value: string): string {
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "";
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, "0");
-  const day = String(date.getDate()).padStart(2, "0");
-  const hours = String(date.getHours()).padStart(2, "0");
-  const minutes = String(date.getMinutes()).padStart(2, "0");
-  return `${year}-${month}-${day}T${hours}:${minutes}`;
-}
-
-function extractLocalDatePart(value: string): string | null {
-  const normalized = value.trim();
-  if (!normalized) return null;
-  const rawDate = normalized.slice(0, 10);
-  if (/^\d{4}-\d{2}-\d{2}$/.test(rawDate)) return rawDate;
-
-  const parsed = new Date(normalized);
-  if (Number.isNaN(parsed.getTime())) return null;
-  const year = parsed.getFullYear();
-  const month = String(parsed.getMonth() + 1).padStart(2, "0");
-  const day = String(parsed.getDate()).padStart(2, "0");
-  return `${year}-${month}-${day}`;
-}
-
-function isLikelyEmail(value: string): boolean {
-  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim().toLowerCase());
-}
-
-function toUtcCalendarStamp(value: string): string {
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "";
-  const year = date.getUTCFullYear();
-  const month = String(date.getUTCMonth() + 1).padStart(2, "0");
-  const day = String(date.getUTCDate()).padStart(2, "0");
-  const hour = String(date.getUTCHours()).padStart(2, "0");
-  const minute = String(date.getUTCMinutes()).padStart(2, "0");
-  const second = String(date.getUTCSeconds()).padStart(2, "0");
-  return `${year}${month}${day}T${hour}${minute}${second}Z`;
-}
-
-function escapeIcsText(value: string): string {
-  return value
-    .replace(/\\/g, "\\\\")
-    .replace(/\r\n/g, "\\n")
-    .replace(/\n/g, "\\n")
-    .replace(/;/g, "\\;")
-    .replace(/,/g, "\\,");
-}
-
-function slugifyForFileName(value: string): string {
-  const normalized = value
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "")
-    .slice(0, 60);
-  return normalized || "actividad";
-}
-
-function parseZoomMeetingIdFromJoinUrl(joinUrl?: string | null): string | null {
-  if (!joinUrl) return null;
-  try {
-    const parsed = new URL(joinUrl);
-    const pieces = parsed.pathname.split("/").filter(Boolean);
-    const roomTypeIndex = pieces.findIndex((piece) => piece === "j" || piece === "w");
-    if (roomTypeIndex < 0) return null;
-    const rawId = pieces[roomTypeIndex + 1] ?? "";
-    const meetingId = rawId.replace(/\D/g, "");
-    return meetingId || null;
-  } catch {
-    return null;
-  }
-}
-
-function resolveInstanceEndIso(
-  instance: NonNullable<Solicitud["zoomInstances"]>[number]
-): string {
-  const explicitEnd = (instance.endTime ?? "").trim();
-  if (explicitEnd) return explicitEnd;
-
-  const startDate = new Date(instance.startTime);
-  if (Number.isNaN(startDate.getTime())) return instance.startTime;
-  const durationMinutes = Number.isFinite(instance.durationMinutes) && instance.durationMinutes > 0
-    ? instance.durationMinutes
-    : 60;
-  return new Date(startDate.getTime() + durationMinutes * 60_000).toISOString();
-}
-
-function buildSolicitudInstanceIcsContent(input: {
-  solicitud: Pick<Solicitud, "id" | "titulo" | "programaNombre" | "meetingPrincipalId">;
-  instance: NonNullable<Solicitud["zoomInstances"]>[number];
-}): string {
-  const startIso = input.instance.startTime;
-  const endIso = resolveInstanceEndIso(input.instance);
-  const dtStamp = toUtcCalendarStamp(new Date().toISOString());
-  const dtStart = toUtcCalendarStamp(startIso);
-  const dtEnd = toUtcCalendarStamp(endIso);
-  const joinUrl = input.instance.joinUrl ?? null;
-  const meetingId = parseZoomMeetingIdFromJoinUrl(joinUrl) ?? input.solicitud.meetingPrincipalId ?? "-";
-  const summary = escapeIcsText(input.solicitud.titulo || "Actividad Zoom");
-  const detailsLines = [
-    `Solicitud: ${input.solicitud.id}`,
-    `Programa: ${input.solicitud.programaNombre || "Sin programa"}`,
-    `Meeting ID: ${meetingId}`,
-    joinUrl ? `Zoom: ${joinUrl}` : null
-  ].filter(Boolean) as string[];
-  const description = escapeIcsText(detailsLines.join("\n"));
-
-  const uidSeed = input.instance.eventId ?? input.instance.occurrenceId ?? startIso;
-  const uid = `${input.solicitud.id}-${uidSeed}@flacso-uruguay`;
-  const lines = [
-    "BEGIN:VCALENDAR",
-    "VERSION:2.0",
-    "PRODID:-//FLACSO Uruguay//Plataforma Zoom//ES",
-    "CALSCALE:GREGORIAN",
-    "METHOD:PUBLISH",
-    "BEGIN:VEVENT",
-    `UID:${uid}`,
-    `DTSTAMP:${dtStamp}`,
-    `DTSTART:${dtStart}`,
-    `DTEND:${dtEnd}`,
-    `SUMMARY:${summary}`,
-    `DESCRIPTION:${description}`,
-    "LOCATION:Zoom",
-    "END:VEVENT",
-    "END:VCALENDAR"
-  ];
-
-  if (joinUrl) {
-    lines.splice(lines.length - 2, 0, `URL:${escapeIcsText(joinUrl)}`);
-  }
-
-  return lines.join("\r\n");
-}
-
-function downloadSolicitudInstanceIcs(input: {
-  solicitud: Pick<Solicitud, "id" | "titulo" | "programaNombre" | "meetingPrincipalId">;
-  instance: NonNullable<Solicitud["zoomInstances"]>[number];
-}): void {
-  const content = buildSolicitudInstanceIcsContent(input);
-  const blob = new Blob([content], { type: "text/calendar;charset=utf-8" });
-  const objectUrl = URL.createObjectURL(blob);
-  const dateLabel = input.instance.startTime.slice(0, 10).replace(/[^0-9]/g, "");
-  const uidSeed = input.instance.eventId ?? input.instance.occurrenceId ?? "instancia";
-  const fileName = `${slugifyForFileName(input.solicitud.titulo || "actividad")}-${dateLabel}-${uidSeed}.ics`;
-
-  const anchor = document.createElement("a");
-  anchor.href = objectUrl;
-  anchor.download = fileName;
-  anchor.style.display = "none";
-  document.body.appendChild(anchor);
-  anchor.click();
-  anchor.remove();
-  URL.revokeObjectURL(objectUrl);
-}
-
-function formatFullInstanceDateTime(instance: NonNullable<Solicitud["zoomInstances"]>[number]): string {
-  const startDate = new Date(instance.startTime);
-  const endDate = new Date(resolveInstanceEndIso(instance));
-
-  if (Number.isNaN(startDate.getTime()) || Number.isNaN(endDate.getTime())) {
-    // Fallback to basic date-time if parsing fails
-    return formatDateTime(instance.startTime);
-  }
-
-  const weekday = new Intl.DateTimeFormat("es-UY", { weekday: "long" }).format(startDate);
-  const date = new Intl.DateTimeFormat("es-UY", { day: "2-digit", month: "2-digit", year: "numeric" }).format(startDate);
-  const startTime = new Intl.DateTimeFormat("es-UY", { hour: "2-digit", minute: "2-digit", hour12: false }).format(startDate);
-  const endTime = new Intl.DateTimeFormat("es-UY", { hour: "2-digit", minute: "2-digit", hour12: false }).format(endDate);
-
-  return `${weekday}, ${date} ${startTime} - ${endTime}`;
-}
-
-async function copyToClipboard(text: string): Promise<boolean> {
-  try {
-    await navigator.clipboard.writeText(text);
-    return true;
-  } catch {
-    return false;
-  }
-}
+import { SolicitudesListSkeleton } from "@/components/spa-tabs/solicitudes/SolicitudesListSkeleton";
+import type {
+  EditMeetingDialogState,
+  EditMeetingDurationDialogState,
+  EditMeetingFormState,
+  SolicitudesListScope,
+  SolicitudesSortMode,
+  SpaTabSolicitudesProps
+} from "@/components/spa-tabs/solicitudes/types";
+import {
+  ADD_INSTANCE_BUSY_MESSAGES,
+  CREATE_PROGRAMA_VALUE,
+  buildEmptyEditMeetingForm,
+  copyToClipboard,
+  downloadSolicitudInstanceIcs,
+  extractLocalDatePart,
+  formatFullInstanceDateTime,
+  getZoomAccountColor,
+  isLikelyEmail,
+  minutesToTime,
+  normalizeEmailInputAsLines,
+  parseDurationToMinutes,
+  parseTimeToMinutes,
+  parseSpecificDateDetails,
+  resolveInstanceEndIso,
+  serializeSpecificDateDetails,
+  toDateTimeLocalInput,
+  type SpecificDateDetail,
+  type SpecificDateDetailMap,
+  zoomWeekdayOptionsFull
+} from "@/components/spa-tabs/solicitudes/utils";
 
 export function SpaTabSolicitudes({
   solicitudes,
@@ -2699,55 +2264,7 @@ export function SpaTabSolicitudes({
             </Stack>
           </Stack>
           {isLoading ? (
-            <Stack spacing={2.5}>
-              {Array.from({ length: 3 }).map((_, i) => (
-                <Paper
-                  key={i}
-                  variant="outlined"
-                  sx={{
-                    borderRadius: 3,
-                    p: 2.5,
-                    borderLeft: "6px solid",
-                    borderLeftColor: "divider",
-                    bgcolor: (theme) => alpha(theme.palette.background.paper, 0.5)
-                  }}
-                >
-                  <Stack direction={{ xs: "column", md: "row" }} spacing={2} justifyContent="space-between" sx={{ mb: 2.5 }}>
-                    <Box sx={{ flex: 1 }}>
-                      <Skeleton variant="text" width="45%" height={32} sx={{ mb: 1 }} animation="wave" />
-                      <Stack direction="row" spacing={1}>
-                        <Skeleton variant="rounded" width={80} height={24} sx={{ borderRadius: 1.5 }} animation="wave" />
-                        <Skeleton variant="rounded" width={100} height={24} sx={{ borderRadius: 1.5 }} animation="wave" />
-                        <Skeleton variant="rounded" width={90} height={24} sx={{ borderRadius: 1.5 }} animation="wave" />
-                      </Stack>
-                    </Box>
-                    <Stack direction="row" spacing={1}>
-                      <Skeleton variant="rounded" width={100} height={32} sx={{ borderRadius: 2 }} animation="wave" />
-                      <Skeleton variant="rounded" width={100} height={32} sx={{ borderRadius: 2 }} animation="wave" />
-                    </Stack>
-                  </Stack>
-                  <Box
-                    sx={{
-                      p: 2,
-                      borderRadius: 3,
-                      border: "1px solid",
-                      borderColor: "divider",
-                      display: "grid",
-                      gridTemplateColumns: { xs: "1fr", sm: "repeat(3, 1fr)" },
-                      gap: 2.5
-                    }}
-                  >
-                    {[1, 2, 3].map((j) => (
-                      <Box key={j}>
-                        <Skeleton variant="text" width="30%" animation="wave" />
-                        <Skeleton variant="text" width="60%" animation="wave" />
-                        <Skeleton variant="text" width="40%" animation="wave" sx={{ mt: 1 }} />
-                      </Box>
-                    ))}
-                  </Box>
-                </Paper>
-              ))}
-            </Stack>
+            <SolicitudesListSkeleton />
           ) : solicitudes.length === 0 ? (
             <Typography variant="body2" color="text.secondary">
               No hay pedidos registrados.
