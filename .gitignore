@@ -40,6 +40,11 @@ flacso-*-????????????.json
 # Codex
 
 .codex/
+/.codex
+
+# TypeScript incremental cache
+
+*.tsbuildinfo
 
 # Proyecto / archivos generados específicos
 
