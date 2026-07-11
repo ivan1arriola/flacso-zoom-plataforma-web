@@ -5445,6 +5445,7 @@ export class SalasLegacyService {
       inicioProgramadoAt?: string;
       motivo?: string | null;
       requiereAsistencia: boolean;
+      asistenteZoomId?: string;
     }
   ) {
     const canManageAsAdmin = user.role === UserRole.ADMINISTRADOR;
@@ -5518,6 +5519,9 @@ export class SalasLegacyService {
     if (!canManageAsAdmin && !ownsSolicitud) {
       throw new Error("No tienes permisos para editar asistencia en esta solicitud.");
     }
+    if (input.asistenteZoomId && !canManageAsAdmin) {
+      throw new Error("Solo administracion puede activar asistencia con asignacion directa.");
+    }
 
     if (
       solicitud.estadoSolicitud === EstadoSolicitudSala.CANCELADA_ADMIN ||
@@ -5573,7 +5577,7 @@ export class SalasLegacyService {
       const alreadyEnabled =
         targetEvent.requiereAsistencia &&
         targetEvent.estadoCobertura !== EstadoCoberturaSoporte.NO_REQUIERE;
-      if (alreadyEnabled) {
+      if (alreadyEnabled && !input.asistenteZoomId) {
         return {
           solicitudId: solicitud.id,
           eventoId: targetEvent.id,
@@ -5662,7 +5666,13 @@ export class SalasLegacyService {
         }
       });
 
-      await sendMonitoringRequiredEmailToAssistantPool({
+      if (input.asistenteZoomId) {
+        await this.assignAssistant(user, targetEvent.id, {
+          asistenteZoomId: input.asistenteZoomId,
+          motivoAsignacion: "Asignación directa al activar asistencia; sin convocatoria general."
+        });
+      } else {
+        await sendMonitoringRequiredEmailToAssistantPool({
         solicitudId: solicitud.id,
         titulo: solicitud.titulo,
         modalidad: solicitud.modalidadReunion,
@@ -5677,14 +5687,16 @@ export class SalasLegacyService {
           eventoId: targetEvent.id,
           error: error instanceof Error ? error.message : String(error)
         });
-      });
+        });
+      }
 
       return {
         solicitudId: solicitud.id,
         eventoId: targetEvent.id,
         requiereAsistencia: true,
         updatedEvents: 1,
-        alreadyEnabled: false
+        alreadyEnabled,
+        assignedDirectly: Boolean(input.asistenteZoomId)
       };
     }
     const alreadyDisabled =

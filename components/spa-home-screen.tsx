@@ -782,6 +782,7 @@ export function SpaHomeScreen() {
       void loadProgramasOnce();
       if (effectiveRole === "ADMINISTRADOR") {
         void loadUsersOnce();
+        void loadAssignmentBoardOnce();
       }
     }
 
@@ -988,6 +989,7 @@ export function SpaHomeScreen() {
     canEditAssistance: canEditSolicitudAssistance,
     updatingAssistanceSolicitudId: updatingAsistenciaSolicitudId,
     updatingAssistanceInstanceKey: updatingAsistenciaInstanciaKey,
+    assignableAssistants,
     onEnableAssistance: enableSolicitudAssistance,
     onToggleAssistanceForInstance: updateSolicitudAssistanceForInstance,
     canDeleteSolicitud: canCreateSolicitudShortcut,

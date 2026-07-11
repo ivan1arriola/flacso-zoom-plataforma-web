@@ -1,6 +1,7 @@
 import type { FormEvent } from "react";
 import type { SolicitudFormState } from "@/src/lib/spa-home/solicitud-form";
 import type { Solicitud } from "@/src/services/solicitudesApi";
+import type { AssignableAssistant } from "@/src/services/dashboardApi";
 
 export interface SpaTabSolicitudesProps {
   solicitudes: Solicitud[];
@@ -73,6 +74,7 @@ export interface SpaTabSolicitudesProps {
   canEditAssistance: boolean;
   updatingAssistanceSolicitudId: string | null;
   updatingAssistanceInstanceKey: string | null;
+  assignableAssistants: AssignableAssistant[];
   onEnableAssistance: (input: {
     solicitudId: string;
     titulo: string;
@@ -84,6 +86,7 @@ export interface SpaTabSolicitudesProps {
     eventoId?: string | null;
     startTime: string;
     requiereAsistencia: boolean;
+    asistenteZoomId?: string;
   }) => void;
   canDeleteSolicitud: boolean;
   canRestoreInstances: boolean;
@@ -132,4 +135,3 @@ export type EditMeetingFormState = {
   inicioProgramadoAt: string;
   finProgramadoAt: string;
 };
-

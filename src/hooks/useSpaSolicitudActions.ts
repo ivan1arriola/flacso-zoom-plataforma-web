@@ -616,10 +616,13 @@ export function useSpaSolicitudActions({
     eventoId?: string | null;
     startTime: string;
     requiereAsistencia: boolean;
+    asistenteZoomId?: string;
   }) {
     const instanceDateLabel = formatDateTime(input.startTime);
     const confirmMessage = input.requiereAsistencia
-      ? `Se habilitara asistencia Zoom solo para la instancia ${instanceDateLabel} de "${input.titulo}". ¿Continuar?`
+      ? input.asistenteZoomId
+        ? `Se habilitara la asistencia y se asignara directamente la persona seleccionada para ${instanceDateLabel}, sin avisar al resto. ¿Continuar?`
+        : `Se habilitara asistencia Zoom solo para la instancia ${instanceDateLabel} de "${input.titulo}". ¿Continuar?`
       : `Se quitara la asistencia Zoom solo para la instancia ${instanceDateLabel} de "${input.titulo}". Si habia una persona asignada recibira correo de cancelacion. ¿Continuar?`;
     if (!window.confirm(confirmMessage)) {
       return;
@@ -634,7 +637,8 @@ export function useSpaSolicitudActions({
         solicitudId: input.solicitudId,
         eventoId: input.eventoId ?? undefined,
         inicioProgramadoAt: input.startTime,
-        requiereAsistencia: input.requiereAsistencia
+        requiereAsistencia: input.requiereAsistencia,
+        asistenteZoomId: input.asistenteZoomId
       });
 
       if (!response.success) {
@@ -643,7 +647,9 @@ export function useSpaSolicitudActions({
       }
 
       if (input.requiereAsistencia) {
-        if (response.alreadyEnabled) {
+        if (response.assignedDirectly) {
+          setMessage(`Asistencia activada y asignada directamente para ${instanceDateLabel}.`);
+        } else if (response.alreadyEnabled) {
           setMessage("La instancia ya tenia asistencia Zoom habilitada.");
         } else {
           setMessage(`Asistencia Zoom habilitada para la instancia ${instanceDateLabel}.`);

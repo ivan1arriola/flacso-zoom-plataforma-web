@@ -510,6 +510,7 @@ export async function updateSolicitudInstanciaAsistencia(input: {
   inicioProgramadoAt?: string;
   motivo?: string;
   requiereAsistencia: boolean;
+  asistenteZoomId?: string;
 }): Promise<{
   success: boolean;
   solicitudId?: string;
@@ -519,6 +520,7 @@ export async function updateSolicitudInstanciaAsistencia(input: {
   cancelledAssignments?: number;
   notifiedAssistants?: number;
   alreadyDisabled?: boolean;
+  assignedDirectly?: boolean;
   error?: string;
 }> {
   const result = await requestJson<{
@@ -531,6 +533,7 @@ export async function updateSolicitudInstanciaAsistencia(input: {
       cancelledAssignments?: number;
       notifiedAssistants?: number;
       alreadyDisabled?: boolean;
+      assignedDirectly?: boolean;
     };
   }>(
     `/api/v1/solicitudes-sala/${encodeURIComponent(input.solicitudId)}/instancias/asistencia`,
@@ -540,7 +543,8 @@ export async function updateSolicitudInstanciaAsistencia(input: {
         eventoId: input.eventoId,
         inicioProgramadoAt: input.inicioProgramadoAt,
         motivo: input.motivo,
-        requiereAsistencia: input.requiereAsistencia
+        requiereAsistencia: input.requiereAsistencia,
+        asistenteZoomId: input.asistenteZoomId
       })
     }
   );
@@ -560,7 +564,8 @@ export async function updateSolicitudInstanciaAsistencia(input: {
     alreadyEnabled: result.data.result?.alreadyEnabled,
     cancelledAssignments: result.data.result?.cancelledAssignments,
     notifiedAssistants: result.data.result?.notifiedAssistants,
-    alreadyDisabled: result.data.result?.alreadyDisabled
+    alreadyDisabled: result.data.result?.alreadyDisabled,
+    assignedDirectly: result.data.result?.assignedDirectly
   };
 }
 

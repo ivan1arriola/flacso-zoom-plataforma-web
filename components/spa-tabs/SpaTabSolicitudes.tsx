@@ -122,6 +122,7 @@ export function SpaTabSolicitudes({
   canEditAssistance,
   updatingAssistanceSolicitudId,
   updatingAssistanceInstanceKey,
+  assignableAssistants,
   onEnableAssistance,
   onToggleAssistanceForInstance,
   canDeleteSolicitud,
@@ -143,6 +144,13 @@ export function SpaTabSolicitudes({
   const theme = useTheme();
   const isDarkMode = theme.palette.mode === "dark";
   const [expandedSolicitudId, setExpandedSolicitudId] = useState<string | null>(null);
+  const [directAssistanceTarget, setDirectAssistanceTarget] = useState<{
+    solicitudId: string;
+    titulo: string;
+    eventoId: string;
+    startTime: string;
+  } | null>(null);
+  const [directAssistantId, setDirectAssistantId] = useState("");
   const [showCancelledBySolicitudId, setShowCancelledBySolicitudId] = useState<Record<string, boolean>>({});
   const [createProgramaOpen, setCreateProgramaOpen] = useState(false);
   const [newProgramaNombre, setNewProgramaNombre] = useState("");
@@ -1222,6 +1230,29 @@ export function SpaTabSolicitudes({
                     >
                       Agendar
                     </Button>
+                  )}
+                  {canManageAssistanceThisInstance && (
+                    !requiresAssistance && instance.eventId ? (
+                      <Button
+                        type="button"
+                        size="small"
+                        variant="contained"
+                        color="primary"
+                        startIcon={<AssignmentIndOutlinedIcon fontSize="small" />}
+                        disabled={Boolean(updatingAssistanceInstanceKey) || isRestoreInProgress}
+                        onClick={() => {
+                          setDirectAssistantId("");
+                          setDirectAssistanceTarget({
+                            solicitudId: item.id,
+                            titulo: item.titulo,
+                            eventoId: instance.eventId as string,
+                            startTime: instance.startTime
+                          });
+                        }}
+                      >
+                        Asignar directo
+                      </Button>
+                    ) : null
                   )}
                   {canManageAssistanceThisInstance && (
                     <Button
@@ -3364,6 +3395,63 @@ export function SpaTabSolicitudes({
             startIcon={<MailOutlineOutlinedIcon fontSize="small" />}
           >
             {sendingReminderSolicitudId ? "Enviando..." : "Enviar recordatorio"}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      <Dialog
+        open={Boolean(directAssistanceTarget)}
+        onClose={() => {
+          setDirectAssistanceTarget(null);
+          setDirectAssistantId("");
+        }}
+        fullWidth
+        maxWidth="sm"
+      >
+        <DialogTitle>Asignar asistencia directamente</DialogTitle>
+        <DialogContent>
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+            Se activará la asistencia solo para esta reunión. No se enviará convocatoria al resto de asistentes.
+          </Typography>
+          <TextField
+            select
+            fullWidth
+            label="Asistente"
+            value={directAssistantId}
+            onChange={(event) => setDirectAssistantId(event.target.value)}
+          >
+            <MenuItem value=""><em>Seleccionar</em></MenuItem>
+            {assignableAssistants.map((assistant) => (
+              <MenuItem key={assistant.id} value={assistant.id}>
+                {assistant.nombre} ({assistant.email})
+              </MenuItem>
+            ))}
+          </TextField>
+        </DialogContent>
+        <DialogActions>
+          <Button
+            onClick={() => {
+              setDirectAssistanceTarget(null);
+              setDirectAssistantId("");
+            }}
+          >
+            Cancelar
+          </Button>
+          <Button
+            variant="contained"
+            disabled={!directAssistanceTarget || !directAssistantId}
+            onClick={() => {
+              if (!directAssistanceTarget || !directAssistantId) return;
+              onToggleAssistanceForInstance({
+                ...directAssistanceTarget,
+                requiereAsistencia: true,
+                asistenteZoomId: directAssistantId
+              });
+              setDirectAssistanceTarget(null);
+              setDirectAssistantId("");
+            }}
+          >
+            Activar y asignar
           </Button>
         </DialogActions>
       </Dialog>

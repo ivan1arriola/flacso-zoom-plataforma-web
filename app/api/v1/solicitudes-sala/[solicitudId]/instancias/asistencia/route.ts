@@ -13,6 +13,7 @@ const enableInstanceAssistanceSchema = z
     eventoId: z.string().trim().optional(),
     inicioProgramadoAt: z.string().trim().optional(),
     motivo: z.string().trim().max(240).optional().or(z.literal("")),
+    asistenteZoomId: z.string().trim().min(1).optional(),
     requiereAsistencia: z.boolean().optional()
   })
   .refine(
@@ -47,7 +48,8 @@ export async function POST(request: Request, context: Params) {
       eventoId: parsed.data.eventoId,
       inicioProgramadoAt: parsed.data.inicioProgramadoAt,
       motivo: typeof parsed.data.motivo === "string" ? parsed.data.motivo : undefined,
-      requiereAsistencia: parsed.data.requiereAsistencia ?? true
+      requiereAsistencia: parsed.data.requiereAsistencia ?? true,
+      asistenteZoomId: parsed.data.asistenteZoomId
     });
     return NextResponse.json({ result });
   } catch (error) {
