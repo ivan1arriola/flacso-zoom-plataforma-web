@@ -3,7 +3,9 @@ import { google } from "googleapis";
 import dotenv from "dotenv";
 import path from "path";
 
-dotenv.config({ path: path.resolve(__dirname, "../.env") });
+dotenv.config({ path: path.resolve(__dirname, "../../.env") });
+
+const shouldRunGoogleIntegrationTests = process.env.RUN_GOOGLE_INTEGRATION_TESTS === "1";
 
 const getCredentials = () => ({
   email: process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL,
@@ -21,9 +23,14 @@ const hasGoogleIntegrationEnv = () => {
   );
 };
 
-const describeGoogleIntegration = hasGoogleIntegrationEnv() ? describe : describe.skip;
+const describeGoogleIntegration = shouldRunGoogleIntegrationTests ? describe : describe.skip;
 
 describeGoogleIntegration("Google Authentication & Permissions (integration)", () => {
+  it("requires explicit integration credentials", () => {
+    expect(process.env.RUN_GOOGLE_INTEGRATION_TESTS).toBe("1");
+    expect(hasGoogleIntegrationEnv()).toBe(true);
+  });
+
   it("should have all required environment variables", () => {
     const { email, key, subject } = getCredentials();
     expect(email).toBeDefined();

@@ -12,7 +12,7 @@
     "audit:recurring-invariant:fix": "node scripts/audit-recurring-meeting-invariant.js --fix",
     "clean:occurrence-id": "node scripts/clean-occurrence-id-from-urls.js",
     "clean:occurrence-id:fix": "node scripts/clean-occurrence-id-from-urls.js --fix",
-    "build": "npm run db:generate && npm run test:db && next build",
+    "build": "npm run db:generate && next build",
     "start": "next start",
     "check": "tsc --noEmit",
     "check:encoding": "node scripts/check-encoding.mjs",
@@ -26,6 +26,8 @@
     "db:push": "prisma db push --skip-generate",
     "db:migrate": "prisma migrate dev",
     "test": "vitest run",
+    "test:integration": "vitest run --config vitest.integration.config.ts",
+    "package:safe": "node scripts/create-safe-zip.mjs",
     "test:watch": "vitest"
   },
   "dependencies": {

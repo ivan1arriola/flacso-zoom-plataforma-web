@@ -9,8 +9,8 @@ export default defineConfig({
   },
   test: {
     environment: "node",
-    include: ["test/**/*.test.ts"],
-    exclude: ["node_modules", ".next", "dist", "build", "test/integration/**"],
+    include: ["test/integration/**/*.integration.test.ts"],
+    exclude: ["node_modules", ".next", "dist", "build"],
     clearMocks: true
   }
 });

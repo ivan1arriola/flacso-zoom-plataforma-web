@@ -91,7 +91,6 @@ export function SpaTabHistoricoAsistencias({ userId, role }: SpaTabHistoricoAsis
     setError("");
     try {
       const payload = await loadPersonHours(userId);
-      console.log("Historico payload:", payload);
 
       if (!payload) {
         setError("No se pudo cargar tu histórico.");

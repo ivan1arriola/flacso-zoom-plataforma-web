@@ -72,6 +72,38 @@ npm run db:push
 npm run dev
 ```
 
+## Validaciones y empaquetado seguro
+
+Tests unitarios/offline:
+
+```bash
+npm test
+```
+
+Tests de integracion Google:
+
+```bash
+RUN_GOOGLE_INTEGRATION_TESTS=1 npm run test:integration
+```
+
+Los tests de integracion requieren red y credenciales validas de Google Service Account, Drive y Gmail (`GOOGLE_SERVICE_ACCOUNT_EMAIL`, `GOOGLE_PRIVATE_KEY`, `GOOGLE_SERVICE_ACCOUNT_SUBJECT` y `DRIVE_DESTINATION_ID`). Si `RUN_GOOGLE_INTEGRATION_TESTS` no vale `1`, se omiten limpiamente.
+
+Chequeo manual de base de datos:
+
+```bash
+npm run test:db
+```
+
+`npm run build` solo genera Prisma y compila Next.js; no valida conectividad con la base de datos. El chequeo de DB queda separado y opt-in para evitar fallas de build o deploy por red/credenciales externas.
+
+ZIP seguro para compartir:
+
+```bash
+npm run package:safe
+```
+
+El ZIP excluye secretos, entornos locales, `.secrets/`, `.git/`, `node_modules/`, builds, coverage, reportes, logs, temporales y ZIPs previos. No compartir `.env` ni `.secrets`.
+
 ## Webhook Zoom (grabaciones)
 
 - Endpoint para Zoom Marketplace: `POST /api/v1/zoom/webhook`
