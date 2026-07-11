@@ -475,6 +475,7 @@ export function SpaHomeScreen() {
     canDelegateSolicitudResponsable,
     setMessage,
     setDocenteSolicitudesView,
+    onSolicitudCreated: () => setTab("solicitudes"),
     setIsSubmittingSolicitud,
     setDeletingSolicitudId,
     setCancellingSerieSolicitudId,

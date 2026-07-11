@@ -27,6 +27,7 @@ type UseSpaSolicitudActionsInput = {
   canDelegateSolicitudResponsable: boolean;
   setMessage: (value: string) => void;
   setDocenteSolicitudesView: (value: "form" | "list") => void;
+  onSolicitudCreated?: () => void;
   setIsSubmittingSolicitud: (value: boolean) => void;
   setDeletingSolicitudId: (value: string | null) => void;
   setCancellingSerieSolicitudId: (value: string | null) => void;
@@ -47,6 +48,7 @@ export function useSpaSolicitudActions({
   canDelegateSolicitudResponsable,
   setMessage,
   setDocenteSolicitudesView,
+  onSolicitudCreated,
   setIsSubmittingSolicitud,
   setDeletingSolicitudId,
   setCancellingSerieSolicitudId,
@@ -127,6 +129,7 @@ export function useSpaSolicitudActions({
 
       setMessage(`Solicitud creada correctamente: ${response.requestId}`);
       setDocenteSolicitudesView("list");
+      onSolicitudCreated?.();
       await refreshAfterSolicitudMutation();
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "No se pudo crear la solicitud.");

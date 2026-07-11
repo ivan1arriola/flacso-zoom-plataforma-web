@@ -2645,13 +2645,29 @@ async function listZoomBusyWindowsForOwner(
   zoomClient: ZoomMeetingsClient,
   ownerEmail: string
 ): Promise<BusyWindow[]> {
-  const upcoming = await zoomClient.listUserMeetings(ownerEmail, {
-    type: "upcoming",
-    page_size: 300
-  });
-  const meetings = Array.isArray(upcoming.meetings)
-    ? (upcoming.meetings as Array<Record<string, unknown>>)
-    : [];
+  // Zoom's generic meetings endpoint can represent a recurring meeting only
+  // once. The dedicated upcoming endpoint returns its concrete occurrences.
+  // Keep both sources so externally-created and recurring meetings reserve the
+  // account just like meetings already registered in our database.
+  const [upcoming, upcomingOccurrences] = await Promise.all([
+    zoomClient.listUserMeetings(ownerEmail, {
+      type: "upcoming",
+      page_size: 300
+    }),
+    // Some Zoom accounts do not expose this endpoint. The generic listing is
+    // still mandatory; this occurrence-level listing is an extra safeguard.
+    zoomClient
+      .listUserUpcomingMeetings(ownerEmail)
+      .catch((): Record<string, unknown> => ({}))
+  ]);
+  const meetings = [
+    ...(Array.isArray(upcoming.meetings)
+      ? (upcoming.meetings as Array<Record<string, unknown>>)
+      : []),
+    ...(Array.isArray(upcomingOccurrences.meetings)
+      ? (upcomingOccurrences.meetings as Array<Record<string, unknown>>)
+      : [])
+  ];
 
   const windows: BusyWindow[] = [];
   for (const meeting of meetings) {
@@ -2718,10 +2734,10 @@ async function listAvailableCuentaZoomCandidatesForAllInstances(instancePlans: I
 
   const evaluations = await Promise.all(
     activeAccounts.map(async (account): Promise<AccountCandidateEvaluation> => {
-      const concurrentLimit =
-        account.limiteEventosConcurrentes && account.limiteEventosConcurrentes > 0
-          ? account.limiteEventosConcurrentes
-          : 1;
+      // A Zoom host account must never be assigned to overlapping meetings.
+      // Scheduling more than one meeting is possible in Zoom, but it does not
+      // guarantee that the same host can run them simultaneously.
+      const concurrentLimit = 1;
 
       const [dbOverlappingEvents, dbFutureEventsCount] = await Promise.all([
         db.eventoZoom.findMany({
@@ -6551,6 +6567,38 @@ export class SalasLegacyService {
   }
 
   async createSolicitud(user: SessionUser, input: CreateSolicitudInput) {
+    // Serialize the complete availability-check -> Zoom-create -> DB-write
+    // sequence across all application instances. Without this database lock,
+    // two simultaneous requests can both observe the same account as free.
+    for (let attemptNumber = 0; attemptNumber < 120; attemptNumber += 1) {
+      const attempt = await db.$transaction(
+        async (lockTx) => {
+          const rows = await lockTx.$queryRaw<Array<{ acquired: boolean }>>(Prisma.sql`
+            SELECT pg_try_advisory_xact_lock(1179403085, 1) AS acquired
+          `);
+          if (!rows[0]?.acquired) {
+            return { acquired: false as const };
+          }
+
+          const value = await this.createSolicitudWithProvisioningLock(user, input);
+          return { acquired: true as const, value };
+        },
+        {
+          maxWait: 10_000,
+          timeout: 300_000
+        }
+      );
+
+      if (attempt.acquired) return attempt.value;
+      await new Promise((resolve) => setTimeout(resolve, 250));
+    }
+
+    throw new Error(
+      "Hay otra solicitud asignando una cuenta Zoom. Intenta nuevamente en unos segundos."
+    );
+  }
+
+  private async createSolicitudWithProvisioningLock(user: SessionUser, input: CreateSolicitudInput) {
     validateZoomRecurrenceRestrictions(input);
     const docentesCopyEmails = parseDocentesEmailsByLine(input.docentesCorreos);
     let docente = await getOrCreateDocente(user);
