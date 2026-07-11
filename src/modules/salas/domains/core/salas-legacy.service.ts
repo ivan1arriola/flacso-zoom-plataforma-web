@@ -9703,6 +9703,47 @@ export class SalasLegacyService {
       }
     });
 
+    const docenteUser = event.solicitud.docente?.usuario ?? null;
+    const docenteEmail = (docenteUser?.email ?? "").trim().toLowerCase();
+    const resolvedResponsableEmail = await resolveResponsibleNotificationEmail(
+      event.solicitud.responsableNombre
+    );
+    const responsableEmail =
+      resolvedResponsableEmail ??
+      (EMAIL_LINE_REGEX.test(docenteEmail) ? docenteEmail : null);
+    const assistantName = getUserDisplayName(selectedAssistant.usuario);
+
+    // Assignment emails are deliberately limited to the person responsible
+    // for the meeting and the assistant who remains assigned. Applicants and
+    // previously assigned assistants are not included.
+    await sendDefinitiveAssignmentEmails({
+      solicitudId: event.solicitud.id,
+      eventoId: event.id,
+      titulo: event.solicitud.titulo,
+      programaNombre: event.solicitud.programaNombre ?? null,
+      modalidad: event.modalidadReunion,
+      inicio: event.inicioProgramadoAt,
+      fin: event.finProgramadoAt,
+      timezone: event.timezone || "America/Montevideo",
+      meetingId: event.zoomMeetingId,
+      joinUrl: event.zoomJoinUrl,
+      hostAccount: pickZoomHostAccountLabel(
+        event.cuentaZoom?.ownerEmail,
+        event.cuentaZoom?.nombreCuenta
+      ),
+      rawPayload: event.zoomPayloadUltimo ?? undefined,
+      requiresAssistance: event.requiereAsistencia,
+      asistenteNombre: assistantName,
+      asistenteEmail: selectedAssistant.usuario.email,
+      responsableEmail
+    }).catch((error) => {
+      logger.warn("No se pudo enviar correo de asignacion a sus destinatarios.", {
+        eventoId,
+        solicitudId: event.solicitud.id,
+        error: error instanceof Error ? error.message : String(error)
+      });
+    });
+
     const timezone = event.timezone || "America/Montevideo";
     const fechaReunion = formatEventDateForNotification(event.inicioProgramadoAt, timezone);
     const programaLabel = event.solicitud.programaNombre?.trim() || null;
@@ -9744,6 +9785,38 @@ export class SalasLegacyService {
       const previousAssistantNames = replacedAssignments
         .map((item) => getUserDisplayName(item.asistente.usuario))
         .filter(Boolean);
+
+      await sendAssistanceCancelledEmails({
+        solicitudId: event.solicitud.id,
+        titulo: event.solicitud.titulo,
+        programaNombre: event.solicitud.programaNombre ?? null,
+        responsableNombre: event.solicitud.responsableNombre ?? null,
+        meetingId: event.zoomMeetingId,
+        joinUrl: event.zoomJoinUrl,
+        hostAccount: pickZoomHostAccountLabel(
+          event.cuentaZoom?.ownerEmail,
+          event.cuentaZoom?.nombreCuenta
+        ),
+        rawPayload: event.zoomPayloadUltimo ?? undefined,
+        requiresAssistance: event.requiereAsistencia,
+        assignedAssistantName: assistantName,
+        timezone,
+        actorNombre: actorDisplayName,
+        actorEmail: admin.email,
+        motivo: "La reunión fue reasignada a otra persona.",
+        recipients: replacedAssignments
+          .map((item) => ({
+            email: item.asistente.usuario.email,
+            nombre: getUserDisplayName(item.asistente.usuario),
+            instancias: [
+              {
+                inicio: event.inicioProgramadoAt,
+                fin: event.finProgramadoAt
+              }
+            ]
+          }))
+          .filter((recipient) => EMAIL_LINE_REGEX.test(recipient.email.trim().toLowerCase()))
+      });
 
       await createAssistantInternalNotifications({
         userIds: previousAssistantIds,
@@ -9878,9 +9951,21 @@ export class SalasLegacyService {
       }
     });
 
-    // Manual roster changes are intentionally silent by email. The affected
-    // assistant still receives a targeted in-app/push notification below.
-    const notifiedCount = 0;
+    const notifiedCount = await sendAssistanceCancelledEmails({
+      solicitudId: event.solicitud.id,
+      titulo: event.solicitud.titulo,
+      programaNombre: event.solicitud.programaNombre ?? null,
+      responsableNombre: event.solicitud.responsableNombre ?? null,
+      meetingId: event.zoomMeetingId,
+      joinUrl: event.zoomJoinUrl,
+      rawPayload: event.zoomPayloadUltimo ?? undefined,
+      requiresAssistance: event.requiereAsistencia,
+      timezone: event.timezone || event.solicitud.timezone || "America/Montevideo",
+      actorNombre: getUserDisplayName(admin),
+      actorEmail: admin.email,
+      motivo: input?.motivo || "Desasignación manual de personal.",
+      recipients: Array.from(recipientsByEmail.values())
+    });
 
     const timezone = event.timezone || event.solicitud.timezone || "America/Montevideo";
     const fechaReunion = formatEventDateForNotification(event.inicioProgramadoAt, timezone);
