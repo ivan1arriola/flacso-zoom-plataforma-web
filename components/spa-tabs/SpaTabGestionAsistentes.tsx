@@ -32,7 +32,6 @@ import ChevronRightIcon from "@mui/icons-material/ChevronRight";
 import LaunchIcon from "@mui/icons-material/Launch";
 import ArrowForwardIcon from "@mui/icons-material/ArrowForward";
 import AssignmentIndIcon from "@mui/icons-material/AssignmentInd";
-import BarChartIcon from "@mui/icons-material/BarChart";
 import GroupIcon from "@mui/icons-material/Group";
 import CloudUploadIcon from "@mui/icons-material/CloudUpload";
 import ArrowBackIcon from "@mui/icons-material/ArrowBack";
@@ -471,35 +470,6 @@ export function SpaTabGestionAsistentes(props: SpaTabGestionAsistentesProps) {
           </Grid>
         )}
 
-        {activeSubTab === 2 && (
-          <Box sx={{ p: 4, textAlign: "center" }}>
-            <BarChartIcon sx={{ fontSize: 64, color: "divider", mb: 2 }} />
-            <Typography variant="h5" sx={{ fontWeight: 800, mb: 1 }}>Estadísticas Globales</Typography>
-            <Typography color="text.secondary" sx={{ maxWidth: 400, mx: "auto", mb: 4 }}>
-              Próximamente: Visualiza el desempeño de todo el equipo de asistencia, cobertura de reuniones y reportes de gestión.
-            </Typography>
-            <Grid container spacing={3}>
-              <Grid size={{ xs: 12, sm: 4 }}>
-                <Card variant="outlined" sx={{ p: 3, borderRadius: 3 }}>
-                  <Typography variant="h4" sx={{ fontWeight: 900 }}>{people.length}</Typography>
-                  <Typography variant="caption" color="text.secondary">Asistentes Activos</Typography>
-                </Card>
-              </Grid>
-              <Grid size={{ xs: 12, sm: 4 }}>
-                <Card variant="outlined" sx={{ p: 3, borderRadius: 3 }}>
-                  <Typography variant="h4" sx={{ fontWeight: 900 }}>98%</Typography>
-                  <Typography variant="caption" color="text.secondary">Cobertura del Mes</Typography>
-                </Card>
-              </Grid>
-              <Grid size={{ xs: 12, sm: 4 }}>
-                <Card variant="outlined" sx={{ p: 3, borderRadius: 3 }}>
-                  <Typography variant="h4" sx={{ fontWeight: 900 }}>$---</Typography>
-                  <Typography variant="caption" color="text.secondary">Total Liquidaciones</Typography>
-                </Card>
-              </Grid>
-            </Grid>
-          </Box>
-        )}
       </Box>
     </Box>
   );

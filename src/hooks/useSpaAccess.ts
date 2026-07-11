@@ -19,7 +19,6 @@ export function useSpaAccess(user: UserLike) {
   const access = useMemo(() => {
     const canSeeAsistentesAsignacion = canAccessTabForRole("asistentes_asignacion", effectiveRole);
     const canSeeAsistentesPerfiles = canAccessTabForRole("asistentes_perfiles", effectiveRole);
-    const canSeeAsistentesEstadisticas = canAccessTabForRole("asistentes_estadisticas", effectiveRole);
 
     return {
       canSeeManual: canAccessTabForRole("manual", effectiveRole),
@@ -33,9 +32,8 @@ export function useSpaAccess(user: UserLike) {
       canSeeHistoricoAsistencias: canAccessTabForRole("historico_asistencias", effectiveRole),
       canSeeAsistentesAsignacion,
       canSeeAsistentesPerfiles,
-      canSeeAsistentesEstadisticas,
       canSeeGestionAsistentes:
-        canSeeAsistentesAsignacion || canSeeAsistentesPerfiles || canSeeAsistentesEstadisticas,
+        canSeeAsistentesAsignacion || canSeeAsistentesPerfiles,
       canSeeTarifas: canAccessTabForRole("tarifas", effectiveRole),
       canSeeEstadisticas: canAccessTabForRole("estadisticas", effectiveRole),
       canSeeNotificaciones: canAccessTabForRole("notificaciones", effectiveRole),

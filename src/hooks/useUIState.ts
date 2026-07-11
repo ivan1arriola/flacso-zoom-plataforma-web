@@ -14,7 +14,6 @@ const tabs = [
   "historico_asistencias",
   "asistentes_asignacion",
   "asistentes_perfiles",
-  "asistentes_estadisticas",
   "manual",
   "historico",
   "cuentas",

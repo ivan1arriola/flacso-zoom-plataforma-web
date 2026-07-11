@@ -1132,16 +1132,15 @@ export function SpaHomeScreen() {
         />
       )}
 
-      {(tab === "asistentes_asignacion" || tab === "asistentes_perfiles" || tab === "asistentes_estadisticas") && canSeeGestionAsistentes && (
+      {(tab === "asistentes_asignacion" || tab === "asistentes_perfiles") && canSeeGestionAsistentes && (
         <SpaTabGestionAsistentes 
           activeSubTab={
             tab === "asistentes_asignacion" ? 0 : 
-            tab === "asistentes_perfiles" ? 1 : 2
+            tab === "asistentes_perfiles" ? 1 : 0
           }
           onTabChange={(index) => {
             if (index === 0) setTab("asistentes_asignacion");
             else if (index === 1) setTab("asistentes_perfiles");
-            else if (index === 2) setTab("asistentes_estadisticas");
           }}
           assignmentBoardEvents={assignmentBoardEvents}
           assignableAssistants={assignableAssistants}

@@ -35,7 +35,6 @@ export const tabs = [
   "historico_asistencias",
   "asistentes_asignacion",
   "asistentes_perfiles",
-  "asistentes_estadisticas",
   "manual",
   "historico",
   "cuentas",
@@ -145,12 +144,6 @@ export const TAB_CONFIG: Record<Tab, TabConfig> = {
     roles: ["ADMINISTRADOR", "CONTADURIA"],
     group: "ASISTENTES"
   },
-  asistentes_estadisticas: {
-    label: "Estadísticas y Reportes",
-    visibleInNavigation: true,
-    roles: ["ADMINISTRADOR", "CONTADURIA"],
-    group: "ASISTENTES"
-  },
   manual: {
     label: "Asociacion manual",
     visibleInNavigation: true,
@@ -223,7 +216,6 @@ export const ROLE_PRESENTATION_TABS: Record<ViewRole, readonly Tab[]> = {
     "programas",
     "asistentes_asignacion",
     "asistentes_perfiles",
-    "asistentes_estadisticas",
     "manual",
     "historico",
     "cuentas",
@@ -258,7 +250,6 @@ export const ROLE_PRESENTATION_TABS: Record<ViewRole, readonly Tab[]> = {
     "dashboard",
     "notificaciones",
     "asistentes_perfiles",
-    "asistentes_estadisticas",
     "tarifas",
     "perfil"
   ]
@@ -346,8 +337,6 @@ export function getTabIcon(tab: Tab): ReactNode {
       return <AssignmentIndOutlinedIcon fontSize="small" />;
     case "asistentes_perfiles":
       return <GroupOutlinedIcon fontSize="small" />;
-    case "asistentes_estadisticas":
-      return <QueryStatsOutlinedIcon fontSize="small" />;
     case "manual":
       return <BuildCircleOutlinedIcon fontSize="small" />;
     case "historico":
