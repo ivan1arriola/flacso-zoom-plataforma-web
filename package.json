@@ -10,6 +10,8 @@
     "test:db": "node scripts/test-db-connection.js",
     "audit:recurring-invariant": "node scripts/audit-recurring-meeting-invariant.js",
     "audit:recurring-invariant:fix": "node scripts/audit-recurring-meeting-invariant.js --fix",
+    "clean:occurrence-id": "node scripts/clean-occurrence-id-from-urls.js",
+    "clean:occurrence-id:fix": "node scripts/clean-occurrence-id-from-urls.js --fix",
     "build": "npm run db:generate && npm run test:db && next build",
     "start": "next start",
     "check": "tsc --noEmit",

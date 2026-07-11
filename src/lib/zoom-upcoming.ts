@@ -52,6 +52,21 @@ function normalizeMeetingId(value: unknown): string | null {
   return /^\d{9,13}$/.test(digits) ? digits : null;
 }
 
+function extractMeetingIdFromJoinUrl(joinUrl: unknown): string | null {
+  if (typeof joinUrl !== "string" || !joinUrl.trim()) return null;
+  try {
+    const parsed = new URL(joinUrl);
+    const host = parsed.hostname.toLowerCase();
+    if (!host.includes("zoom.us")) return null;
+    const pathParts = parsed.pathname.split("/").filter(Boolean);
+    const roomIndex = pathParts.findIndex((part) => part === "j" || part === "w");
+    if (roomIndex < 0 || !pathParts[roomIndex + 1]) return null;
+    return normalizeMeetingId(pathParts[roomIndex + 1]);
+  } catch {
+    return null;
+  }
+}
+
 function resolveOccurrenceId(meeting: ZoomUnknownRecord): string | null {
   const direct = getString(meeting.occurrence_id);
   if (direct) return direct;
@@ -101,7 +116,7 @@ export function normalizeZoomUpcomingEvents(
     const durationMinutes = normalizeDurationMinutes(meeting.duration);
     const meetingType = resolveMeetingType(meeting.type);
     const endDate = new Date(startDate.getTime() + durationMinutes * 60_000);
-    const meetingId = normalizeMeetingId(meeting.id);
+    const meetingId = normalizeMeetingId(meeting.id) ?? extractMeetingIdFromJoinUrl(meeting.join_url);
     const meetingUuid = resolveMeetingUuid(meeting);
     const occurrenceId = resolveOccurrenceId(meeting);
     const uniqueRowId = [meetingId ?? `${startDate.getTime()}`, occurrenceId ?? startDate.toISOString()].join(":");

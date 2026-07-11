@@ -1872,18 +1872,13 @@ function parseZoomMeetingSnapshot(data: Record<string, unknown>): ZoomMeetingSna
     const durationMinutes = Math.max(1, numberFromUnknown(occurrence.duration) ?? defaultDuration);
     const status = typeof occurrence.status === "string" ? occurrence.status : null;
     const endTime = new Date(parsedStart.getTime() + durationMinutes * 60_000).toISOString();
-    const joinUrlForOccurrence =
-      joinUrl && occurrenceId
-        ? `${joinUrl}${joinUrl.includes("?") ? "&" : "?"}occurrence_id=${encodeURIComponent(occurrenceId)}`
-        : joinUrl;
-
     instances.push({
       occurrenceId,
       startTime: parsedStart.toISOString(),
       endTime,
       durationMinutes,
       status,
-      joinUrl: joinUrlForOccurrence,
+      joinUrl,
       requiereAsistencia: null,
       monitorNombre: null,
       monitorEmail: null
