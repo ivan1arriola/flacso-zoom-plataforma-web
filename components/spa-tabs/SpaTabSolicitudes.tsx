@@ -1176,9 +1176,6 @@ export function SpaTabSolicitudes({
                       assistantEmail={instance.monitorEmail ?? null}
                       pendingLabel="Pendiente"
                     />
-                    {instance.occurrenceId ? (
-                      <Chip size="small" variant="outlined" label={`occurrence_id ${instance.occurrenceId}`} />
-                    ) : null}
                   </Stack>
                 </Box>
                 <Stack direction={{ xs: "column", sm: "row" }} spacing={1}>
