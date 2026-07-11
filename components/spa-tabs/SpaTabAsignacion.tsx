@@ -151,6 +151,7 @@ export function SpaTabAsignacion({
   function buildOptionsForEvent(item: AssignmentBoardEvent): Array<{ id: string; label: string }> {
     const currentAssignment = item.currentAssignment ?? null;
     const optionsMap = new Map<string, { id: string; label: string }>();
+    const interestedIds = new Set(item.interesados.map((interest) => interest.asistenteZoomId));
 
     if (currentAssignment) {
       optionsMap.set(currentAssignment.asistenteZoomId, {
@@ -159,11 +160,11 @@ export function SpaTabAsignacion({
       });
     }
 
-    for (const interest of item.interesados) {
-      if (!optionsMap.has(interest.asistenteZoomId)) {
-        optionsMap.set(interest.asistenteZoomId, {
-          id: interest.asistenteZoomId,
-          label: `${interest.nombre} (${interest.email})`
+    for (const assistant of assignableAssistants) {
+      if (!optionsMap.has(assistant.id)) {
+        optionsMap.set(assistant.id, {
+          id: assistant.id,
+          label: `${assistant.nombre} (${assistant.email})${interestedIds.has(assistant.id) ? " · Se postuló" : ""}`
         });
       }
     }
@@ -183,7 +184,7 @@ export function SpaTabAsignacion({
     
     const showSelectionDropdown = isPending || isEditing;
 
-    const actionDisabled = assigningEventId === item.id || !selectedAssistantId || (isNoopSelection && !isEditing) || (hasNoInterested && isPending);
+    const actionDisabled = assigningEventId === item.id || !selectedAssistantId || (isNoopSelection && !isEditing);
     
     const suggestedAssignment = assignmentSuggestion?.events.find((suggested) => suggested.eventoId === item.id) ?? null;
     const suggestedAssistantId = suggestedAssignment?.asistenteZoomId ?? "";
@@ -261,21 +262,20 @@ export function SpaTabAsignacion({
                 </Typography>
                 
                 {hasNoInterested && isPending ? (
-                  <Alert severity="warning" sx={{ py: 0, mb: 1 }}>
-                    No hay postulantes para esta reunión.
+                  <Alert severity="info" sx={{ py: 0, mb: 1 }}>
+                    No hay postulantes. Puedes asignar igualmente cualquier asistente activo.
                   </Alert>
-                ) : (
-                  <Stack direction="row" spacing={1} sx={{ mb: 2, flexWrap: "wrap", gap: 1 }}>
-                    <Typography variant="body2" sx={{ alignSelf: "center", mr: 1 }}>Interesados:</Typography>
-                    {item.interesados.length > 0 ? (
-                      item.interesados.map(int => (
-                        <Chip key={int.asistenteZoomId} size="small" avatar={<Avatar>{int.nombre[0]}</Avatar>} label={int.nombre} />
-                      ))
-                    ) : (
-                      <Typography variant="caption" color="text.secondary">Sin postulantes</Typography>
-                    )}
-                  </Stack>
-                )}
+                ) : null}
+                <Stack direction="row" spacing={1} sx={{ mb: 2, flexWrap: "wrap", gap: 1 }}>
+                  <Typography variant="body2" sx={{ alignSelf: "center", mr: 1 }}>Postulados:</Typography>
+                  {item.interesados.length > 0 ? (
+                    item.interesados.map(int => (
+                      <Chip key={int.asistenteZoomId} size="small" avatar={<Avatar>{int.nombre[0]}</Avatar>} label={int.nombre} />
+                    ))
+                  ) : (
+                    <Typography variant="caption" color="text.secondary">Ninguno</Typography>
+                  )}
+                </Stack>
 
                 <Stack direction={{ xs: "column", sm: "row" }} spacing={1} alignItems="center">
                   <TextField
@@ -284,7 +284,7 @@ export function SpaTabAsignacion({
                     fullWidth
                     value={selectedAssistantId}
                     onChange={(e) => onSelectedAssistantChange(item.id, e.target.value)}
-                    label="Seleccionar Asistente"
+                    label="Seleccionar cualquier asistente activo"
                   >
                     <MenuItem value=""><em>Ninguno</em></MenuItem>
                     {options.map((option) => (

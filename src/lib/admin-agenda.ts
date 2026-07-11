@@ -22,6 +22,7 @@ export type AgendaMeeting = {
   estadoCobertura: string | null;
   joinUrl: string | null;
   zoomMeetingId: string | null;
+  zoomHostAccount: string | null;
   requiresAssistance: boolean;
   monitorNombre: string | null;
   monitorEmail: string | null;
@@ -99,8 +100,15 @@ export function buildAgendaMeetings(solicitudes: Solicitud[]): AgendaMeeting[] {
         instance.durationMinutes
       );
       const zoomMeetingId =
+        normalizeZoomMeetingId(instance.meetingId) ??
         normalizeZoomMeetingId(solicitud.meetingPrincipalId) ??
         extractZoomMeetingIdFromUrl(instance.joinUrl ?? solicitud.zoomJoinUrl ?? null);
+      const zoomHostAccount =
+        normalizeText(instance.hostAccount) ||
+        normalizeText(solicitud.zoomHostAccount) ||
+        normalizeText(solicitud.cuentaZoomAsignada?.ownerEmail) ||
+        normalizeText(solicitud.cuentaZoomAsignada?.nombreCuenta) ||
+        null;
       const joinUrl = resolveZoomJoinUrl(
         instance.joinUrl ?? solicitud.zoomJoinUrl ?? null,
         zoomMeetingId
@@ -131,6 +139,7 @@ export function buildAgendaMeetings(solicitudes: Solicitud[]): AgendaMeeting[] {
         estadoCobertura: instance.estadoCobertura ?? null,
         joinUrl,
         zoomMeetingId,
+        zoomHostAccount,
         requiresAssistance,
         monitorNombre: normalizeText(instance.monitorNombre) || null,
         monitorEmail: normalizeText(instance.monitorEmail) || null,

@@ -5,6 +5,7 @@ import { Button, Stack, Typography } from "@mui/material";
 import type { SxProps, Theme } from "@mui/material/styles";
 import VisibilityOutlinedIcon from "@mui/icons-material/VisibilityOutlined";
 import VisibilityOffOutlinedIcon from "@mui/icons-material/VisibilityOffOutlined";
+import ContentCopyOutlinedIcon from "@mui/icons-material/ContentCopyOutlined";
 import { loadZoomAccountPassword } from "@/src/services/tarifasApi";
 
 const MASKED_PASSWORD = "********";
@@ -28,6 +29,7 @@ export function ZoomAccountPasswordField({
   const [password, setPassword] = useState<string | null>(null);
   const [error, setError] = useState("");
   const [hasFetched, setHasFetched] = useState(false);
+  const [copied, setCopied] = useState(false);
 
   useEffect(() => {
     setIsVisible(false);
@@ -35,6 +37,7 @@ export function ZoomAccountPasswordField({
     setPassword(null);
     setError("");
     setHasFetched(false);
+    setCopied(false);
   }, [normalizedHostAccount]);
 
   async function handleToggleVisibility() {
@@ -66,6 +69,17 @@ export function ZoomAccountPasswordField({
       }
     }
     setIsLoading(false);
+  }
+
+  async function handleCopy() {
+    if (!password) return;
+    try {
+      await navigator.clipboard.writeText(password);
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 2000);
+    } catch {
+      setCopied(false);
+    }
   }
 
   const displayValue = !normalizedHostAccount
@@ -103,6 +117,18 @@ export function ZoomAccountPasswordField({
             startIcon={isVisible ? <VisibilityOffOutlinedIcon fontSize="small" /> : <VisibilityOutlinedIcon fontSize="small" />}
           >
             {isLoading ? "Consultando..." : isVisible ? "Ocultar" : "Ver clave"}
+          </Button>
+        ) : null}
+        {isVisible && password ? (
+          <Button
+            size={size}
+            variant="outlined"
+            onClick={() => {
+              void handleCopy();
+            }}
+            startIcon={<ContentCopyOutlinedIcon fontSize="small" />}
+          >
+            {copied ? "Copiada" : "Copiar"}
           </Button>
         ) : null}
       </Stack>

@@ -73,6 +73,8 @@ type ZoomRecurrencePayload = {
 
 type ZoomOccurrenceSnapshot = {
   eventId?: string | null;
+  meetingId?: string | null;
+  hostAccount?: string | null;
   occurrenceId: string | null;
   startTime: string;
   endTime?: string;
@@ -4514,6 +4516,12 @@ export class SalasLegacyService {
             requiereAsistencia: true,
             zoomMeetingId: true,
             zoomJoinUrl: true,
+            cuentaZoom: {
+              select: {
+                ownerEmail: true,
+                nombreCuenta: true
+              }
+            },
             asignaciones: {
               where: {
                 tipoAsignacion: TipoAsignacionAsistente.PRINCIPAL,
@@ -4597,6 +4605,11 @@ export class SalasLegacyService {
 
         return {
           eventId: event.id,
+          meetingId: normalizeZoomMeetingId(event.zoomMeetingId),
+          hostAccount: pickZoomHostAccountLabel(
+            event.cuentaZoom?.ownerEmail,
+            event.cuentaZoom?.nombreCuenta
+          ),
           occurrenceId: null,
           startTime: event.inicioProgramadoAt.toISOString(),
           endTime: event.finProgramadoAt.toISOString(),
@@ -4684,6 +4697,14 @@ export class SalasLegacyService {
 
         zoomInstancesByMinute.set(minuteKey, {
           eventId: matchedFallback?.eventId ?? null,
+          meetingId: matchedFallback?.meetingId ?? meetingId,
+          hostAccount:
+            matchedFallback?.hostAccount ??
+            pickZoomHostAccountLabel(
+              snapshot?.hostEmail,
+              solicitud.cuentaZoomAsignada?.ownerEmail,
+              solicitud.cuentaZoomAsignada?.nombreCuenta
+            ),
           occurrenceId: snapshotInstance.occurrenceId ?? matchedFallback?.occurrenceId ?? null,
           startTime: matchedFallback?.startTime ?? snapshotInstance.startTime,
           endTime:
@@ -9682,39 +9703,6 @@ export class SalasLegacyService {
       }
     });
 
-    const docenteUser = event.solicitud.docente?.usuario ?? null;
-    const docenteEmail = (docenteUser?.email ?? "").trim().toLowerCase();
-    const resolvedResponsableEmail = await resolveResponsibleNotificationEmail(
-      event.solicitud.responsableNombre
-    );
-    const responsableEmail = resolvedResponsableEmail ?? (EMAIL_LINE_REGEX.test(docenteEmail) ? docenteEmail : null);
-    const assistantName = getUserDisplayName(selectedAssistant.usuario);
-
-    await sendDefinitiveAssignmentEmails({
-      solicitudId: event.solicitud.id,
-      eventoId: event.id,
-      titulo: event.solicitud.titulo,
-      programaNombre: event.solicitud.programaNombre ?? null,
-      modalidad: event.modalidadReunion,
-      inicio: event.inicioProgramadoAt,
-      fin: event.finProgramadoAt,
-      timezone: event.timezone || "America/Montevideo",
-      meetingId: event.zoomMeetingId,
-      joinUrl: event.zoomJoinUrl,
-      hostAccount: pickZoomHostAccountLabel(event.cuentaZoom?.ownerEmail, event.cuentaZoom?.nombreCuenta),
-      rawPayload: event.zoomPayloadUltimo ?? undefined,
-      requiresAssistance: event.requiereAsistencia,
-      asistenteNombre: assistantName,
-      asistenteEmail: selectedAssistant.usuario.email,
-      responsableEmail
-    }).catch((error) => {
-      logger.warn("No se pudo enviar correo de asignacion definitiva.", {
-        eventoId,
-        solicitudId: event.solicitud.id,
-        error: error instanceof Error ? error.message : String(error)
-      });
-    });
-
     const timezone = event.timezone || "America/Montevideo";
     const fechaReunion = formatEventDateForNotification(event.inicioProgramadoAt, timezone);
     const programaLabel = event.solicitud.programaNombre?.trim() || null;
@@ -9890,18 +9878,9 @@ export class SalasLegacyService {
       }
     });
 
-    // Notify assistants
-    const notifiedCount = await sendAssistanceCancelledEmails({
-      solicitudId: event.solicitud.id,
-      titulo: event.solicitud.titulo,
-      programaNombre: event.solicitud.programaNombre ?? null,
-      responsableNombre: event.solicitud.responsableNombre ?? null,
-      timezone: event.solicitud.timezone || "America/Montevideo",
-      actorNombre: getUserDisplayName(admin),
-      actorEmail: admin.email,
-      motivo: input?.motivo || "Desasignacion manual de personal.",
-      recipients: Array.from(recipientsByEmail.values())
-    });
+    // Manual roster changes are intentionally silent by email. The affected
+    // assistant still receives a targeted in-app/push notification below.
+    const notifiedCount = 0;
 
     const timezone = event.timezone || event.solicitud.timezone || "America/Montevideo";
     const fechaReunion = formatEventDateForNotification(event.inicioProgramadoAt, timezone);

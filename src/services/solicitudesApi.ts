@@ -25,6 +25,8 @@ export type Solicitud = {
   zoomReadFromApi?: boolean;
   zoomInstances?: Array<{
     eventId?: string | null;
+    meetingId?: string | null;
+    hostAccount?: string | null;
     occurrenceId?: string | null;
     startTime: string;
     endTime?: string;

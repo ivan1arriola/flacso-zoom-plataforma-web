@@ -19,12 +19,9 @@ import {
   Typography
 } from "@mui/material";
 import { alpha, useTheme, type Theme } from "@mui/material/styles";
-import CalendarMonthRoundedIcon from "@mui/icons-material/CalendarMonthRounded";
 import EventRepeatRoundedIcon from "@mui/icons-material/EventRepeatRounded";
 import OpenInNewRoundedIcon from "@mui/icons-material/OpenInNewRounded";
 import SearchRoundedIcon from "@mui/icons-material/SearchRounded";
-import TimelineRoundedIcon from "@mui/icons-material/TimelineRounded";
-import TodayRoundedIcon from "@mui/icons-material/TodayRounded";
 import NotificationsActiveRoundedIcon from "@mui/icons-material/NotificationsActiveRounded";
 import type { Solicitud } from "@/src/services/solicitudesApi";
 import {
@@ -34,6 +31,7 @@ import {
 } from "@/src/lib/admin-agenda";
 import { renotifyOpenAgenda } from "@/src/services/agendaApi";
 import { MeetingAssistantStatusChip } from "@/components/spa-tabs/MeetingAssistantStatusChip";
+import { ZoomAccountPasswordField } from "@/components/spa-tabs/ZoomAccountPasswordField";
 import {
   formatModalidad,
   formatZoomDateTime,
@@ -41,7 +39,6 @@ import {
   normalizeZoomMeetingId
 } from "@/components/spa-tabs/spa-tabs-utils";
 
-type AgendaViewMode = "CALENDAR" | "TIMELINE";
 type AgendaScope = "PROXIMAS" | "PASADAS" | "CANCELADAS" | "TODAS";
 type AgendaAssistanceFilter =
   | "TODAS"
@@ -50,42 +47,14 @@ type AgendaAssistanceFilter =
   | "ASIGNADAS"
   | "PENDIENTES";
 
-type CalendarDay = {
-  key: string;
-  dayNumber: number;
-  inCurrentMonth: boolean;
-  isToday: boolean;
-};
-
 interface SpaTabAgendaAdminProps {
   solicitudes: Solicitud[];
-}
-
-function getMonthKey(value: string): string {
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "";
-  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;
 }
 
 function getDayKey(value: string): string {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return "";
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
-}
-
-function parseMonthKey(monthKey: string): Date | null {
-  const [yearRaw = "", monthRaw = ""] = monthKey.split("-");
-  const year = Number(yearRaw);
-  const month = Number(monthRaw);
-  if (!Number.isFinite(year) || !Number.isFinite(month) || month < 1 || month > 12) return null;
-  const date = new Date(year, month - 1, 1);
-  return Number.isNaN(date.getTime()) ? null : date;
-}
-
-function formatMonthLabel(monthKey: string): string {
-  const parsed = parseMonthKey(monthKey);
-  if (!parsed) return monthKey;
-  return parsed.toLocaleDateString("es-UY", { month: "long", year: "numeric" });
 }
 
 function formatDayLabel(dayKey: string): string {
@@ -100,45 +69,6 @@ function formatDayLabel(dayKey: string): string {
     day: "numeric",
     month: "long"
   });
-}
-
-function startOfCalendarGrid(date: Date): Date {
-  const next = new Date(date);
-  next.setHours(0, 0, 0, 0);
-  const day = (next.getDay() + 6) % 7;
-  next.setDate(next.getDate() - day);
-  return next;
-}
-
-function endOfCalendarGrid(date: Date): Date {
-  const monthEnd = new Date(date.getFullYear(), date.getMonth() + 1, 0);
-  monthEnd.setHours(0, 0, 0, 0);
-  const day = (monthEnd.getDay() + 6) % 7;
-  monthEnd.setDate(monthEnd.getDate() + (6 - day));
-  return monthEnd;
-}
-
-function buildCalendarDays(monthKey: string): CalendarDay[] {
-  const monthDate = parseMonthKey(monthKey);
-  if (!monthDate) return [];
-
-  const today = new Date();
-  const todayKey = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
-  const start = startOfCalendarGrid(monthDate);
-  const end = endOfCalendarGrid(monthDate);
-  const days: CalendarDay[] = [];
-
-  for (let cursor = new Date(start); cursor <= end; cursor.setDate(cursor.getDate() + 1)) {
-    const key = `${cursor.getFullYear()}-${String(cursor.getMonth() + 1).padStart(2, "0")}-${String(cursor.getDate()).padStart(2, "0")}`;
-    days.push({
-      key,
-      dayNumber: cursor.getDate(),
-      inCurrentMonth: cursor.getMonth() === monthDate.getMonth(),
-      isToday: key === todayKey
-    });
-  }
-
-  return days;
 }
 
 
@@ -159,7 +89,8 @@ function matchesSearch(meeting: AgendaMeeting, query: string): boolean {
     meeting.docenteEmail,
     meeting.monitorNombre,
     meeting.monitorEmail,
-    meeting.zoomMeetingId
+    meeting.zoomMeetingId,
+    meeting.zoomHostAccount
   ]
     .filter(Boolean)
     .join(" ")
@@ -283,11 +214,6 @@ function buildMeetingSummary(meetings: AgendaMeeting[]) {
   };
 }
 
-function compactAssistantLabel(meeting: AgendaMeeting): string {
-  if (!meeting.requiresAssistance) return "Sin asistencia";
-  return meeting.monitorNombre || meeting.monitorEmail || "Pendiente";
-}
-
 function buildDayGroups(meetings: AgendaMeeting[]): Array<{ key: string; label: string; meetings: AgendaMeeting[] }> {
   const grouped = new Map<string, AgendaMeeting[]>();
   for (const meeting of meetings) {
@@ -309,35 +235,8 @@ function buildDayGroups(meetings: AgendaMeeting[]): Array<{ key: string; label: 
     .sort((left, right) => left.key.localeCompare(right.key));
 }
 
-function WeekdayHeader() {
-  const weekdays = ["Lun", "Mar", "Mié", "Jue", "Vie", "Sáb", "Dom"];
-  return (
-    <Box
-      sx={{
-        display: "grid",
-        gridTemplateColumns: "repeat(7, minmax(0, 1fr))",
-        gap: 1,
-        mb: 1
-      }}
-    >
-      {weekdays.map((weekday) => (
-        <Paper
-          key={weekday}
-          variant="outlined"
-          sx={{ py: 1, textAlign: "center", borderRadius: 2, bgcolor: "background.default" }}
-        >
-          <Typography variant="caption" sx={{ fontWeight: 800, letterSpacing: 0.4 }}>
-            {weekday}
-          </Typography>
-        </Paper>
-      ))}
-    </Box>
-  );
-}
-
 export function SpaTabAgendaAdmin({ solicitudes }: SpaTabAgendaAdminProps) {
   const theme = useTheme();
-  const [viewMode, setViewMode] = useState<AgendaViewMode>("CALENDAR");
   const [scope, setScope] = useState<AgendaScope>("PROXIMAS");
   const [assistanceFilter, setAssistanceFilter] = useState<AgendaAssistanceFilter>("TODAS");
   const [search, setSearch] = useState("");
@@ -371,26 +270,6 @@ export function SpaTabAgendaAdmin({ solicitudes }: SpaTabAgendaAdminProps) {
       );
     });
   }, [assistanceFilter, searchQuery, visibleByScope]);
-  const calendarMonthGroups = useMemo(
-    () =>
-      Array.from(new Set(visibleMeetings.map((meeting) => getMonthKey(meeting.startTime)).filter(Boolean)))
-        .sort((left, right) => left.localeCompare(right)),
-    [visibleMeetings]
-  );
-  const meetingsByDay = useMemo(() => {
-    const grouped = new Map<string, AgendaMeeting[]>();
-    for (const meeting of visibleMeetings) {
-      const dayKey = getDayKey(meeting.startTime);
-      if (!dayKey) continue;
-      const existing = grouped.get(dayKey);
-      if (existing) existing.push(meeting);
-      else grouped.set(dayKey, [meeting]);
-    }
-    for (const meetings of grouped.values()) {
-      meetings.sort((left, right) => new Date(left.startTime).getTime() - new Date(right.startTime).getTime());
-    }
-    return grouped;
-  }, [visibleMeetings]);
   const summary = useMemo(() => buildMeetingSummary(visibleMeetings), [visibleMeetings]);
   const timelineGroups = useMemo(() => buildDayGroups(visibleMeetings), [visibleMeetings]);
   const unscheduledRequests = useMemo(
@@ -413,7 +292,7 @@ export function SpaTabAgendaAdmin({ solicitudes }: SpaTabAgendaAdminProps) {
                 Agenda general
               </Typography>
               <Typography variant="body2" color="text.secondary">
-                Vista administrativa de las instancias de reunión ya programadas en el sistema.
+                Línea de tiempo administrativa de las reuniones programadas en el sistema.
               </Typography>
             </Box>
             <Button
@@ -443,25 +322,6 @@ export function SpaTabAgendaAdmin({ solicitudes }: SpaTabAgendaAdminProps) {
           ) : null}
 
           <Stack direction={{ xs: "column", lg: "row" }} spacing={1.25} useFlexGap>
-            <ToggleButtonGroup
-              exclusive
-              size="small"
-              value={viewMode}
-              onChange={(_event, value: AgendaViewMode | null) => {
-                if (value) setViewMode(value);
-              }}
-              sx={{ flexWrap: "wrap" }}
-            >
-              <ToggleButton value="CALENDAR">
-                <CalendarMonthRoundedIcon sx={{ fontSize: 18, mr: 0.75 }} />
-                Calendario
-              </ToggleButton>
-              <ToggleButton value="TIMELINE">
-                <TimelineRoundedIcon sx={{ fontSize: 18, mr: 0.75 }} />
-                Línea de tiempo
-              </ToggleButton>
-            </ToggleButtonGroup>
-
             <ToggleButtonGroup
               exclusive
               size="small"
@@ -523,133 +383,7 @@ export function SpaTabAgendaAdmin({ solicitudes }: SpaTabAgendaAdminProps) {
             </Alert>
           ) : null}
 
-          {visibleMeetings.length > 0 && viewMode === "CALENDAR" ? (
-            <Box sx={{ overflowX: "auto" }}>
-              <Box sx={{ minWidth: 960 }}>
-                <Stack spacing={2.5}>
-                  {calendarMonthGroups.map((monthKey) => {
-                    const calendarDays = buildCalendarDays(monthKey);
-                    return (
-                      <Box key={monthKey}>
-                        <Stack direction="row" spacing={1} alignItems="center" sx={{ mb: 1.25 }}>
-                          <Typography variant="h6" sx={{ fontWeight: 800 }}>
-                            {formatMonthLabel(monthKey)}
-                          </Typography>
-                          <Chip
-                            size="small"
-                            variant="outlined"
-                            label={`${
-                              visibleMeetings.filter((meeting) => getMonthKey(meeting.startTime) === monthKey).length
-                            } reunión(es)`}
-                          />
-                        </Stack>
-
-                        <WeekdayHeader />
-                        <Box
-                          sx={{
-                            display: "grid",
-                            gridTemplateColumns: "repeat(7, minmax(0, 1fr))",
-                            gap: 1
-                          }}
-                        >
-                          {calendarDays.map((day) => {
-                            const dayMeetings = meetingsByDay.get(day.key) ?? [];
-                            return (
-                              <Paper
-                                key={day.key}
-                                variant="outlined"
-                                sx={{
-                                  minHeight: 180,
-                                  p: 1.2,
-                                  borderRadius: 2.5,
-                                  bgcolor: day.inCurrentMonth
-                                    ? theme.palette.background.paper
-                                    : alpha(theme.palette.action.disabledBackground, 0.35),
-                                  borderColor: day.isToday ? "primary.main" : "divider"
-                                }}
-                              >
-                                <Stack spacing={1}>
-                                  <Stack direction="row" alignItems="center" justifyContent="space-between">
-                                    <Typography
-                                      variant="subtitle2"
-                                      sx={{
-                                        fontWeight: 800,
-                                        color: day.inCurrentMonth ? "text.primary" : "text.disabled"
-                                      }}
-                                    >
-                                      {day.dayNumber}
-                                    </Typography>
-                                    {day.isToday ? (
-                                      <Chip
-                                        size="small"
-                                        color="primary"
-                                        icon={<TodayRoundedIcon sx={{ fontSize: 14 }} />}
-                                        label="Hoy"
-                                      />
-                                    ) : null}
-                                  </Stack>
-
-                                  {dayMeetings.length === 0 ? (
-                                    <Typography variant="caption" color="text.secondary">
-                                      Sin reuniones
-                                    </Typography>
-                                  ) : (
-                                    <Stack spacing={0.8} sx={{ maxHeight: 280, overflowY: "auto", pr: 0.3 }}>
-                                      {dayMeetings.map((meeting) => {
-                                        const eventTone = resolveEventTone(meeting);
-                                        return (
-                                          <Paper
-                                            key={meeting.key}
-                                            variant="outlined"
-                                            sx={{
-                                              p: 1,
-                                              borderRadius: 2,
-                                              borderColor: alpha(resolveToneAccent(theme, eventTone.color), 0.35),
-                                              bgcolor: alpha(resolveToneAccent(theme, eventTone.color), 0.06)
-                                            }}
-                                          >
-                                            <Stack spacing={0.75}>
-                                              <Typography variant="caption" sx={{ fontWeight: 800 }}>
-                                                {formatZoomTime(meeting.startTime)} · {meeting.title}
-                                              </Typography>
-                                              <Typography variant="caption" color="text.secondary">
-                                                {meeting.programaNombre || "Sin programa"}
-                                              </Typography>
-                                              <Stack direction="row" spacing={0.6} useFlexGap flexWrap="wrap">
-                                                <Chip size="small" label={formatModalidad(meeting.modalidadReunion)} variant="outlined" />
-                                                <Chip size="small" label={eventTone.label} color={eventTone.color} />
-                                                {meeting.totalInstances > 1 ? (
-                                                  <Chip
-                                                    size="small"
-                                                    icon={<EventRepeatRoundedIcon sx={{ fontSize: 14 }} />}
-                                                    label={`${meeting.instanceIndex}/${meeting.totalInstances}`}
-                                                    variant="outlined"
-                                                  />
-                                                ) : null}
-                                              </Stack>
-                                              <Typography variant="caption" color="text.secondary">
-                                                {compactAssistantLabel(meeting)}
-                                              </Typography>
-                                            </Stack>
-                                          </Paper>
-                                        );
-                                      })}
-                                    </Stack>
-                                  )}
-                                </Stack>
-                              </Paper>
-                            );
-                          })}
-                        </Box>
-                      </Box>
-                    );
-                  })}
-                </Stack>
-              </Box>
-            </Box>
-          ) : null}
-
-          {visibleMeetings.length > 0 && viewMode === "TIMELINE" ? (
+          {visibleMeetings.length > 0 ? (
             <Stack spacing={2}>
               {timelineGroups.map((group) => (
                 <Box key={group.key}>
@@ -779,9 +513,25 @@ export function SpaTabAgendaAdmin({ solicitudes }: SpaTabAgendaAdminProps) {
                                 </Box>
                                 <Box>
                                   <Typography variant="caption" color="text.secondary">
-                                    Solicitud
+                                    Cuenta Zoom
                                   </Typography>
-                                  <Typography variant="body2">{meeting.solicitudId}</Typography>
+                                  <Typography variant="body2" sx={{ wordBreak: "break-word" }}>
+                                    {meeting.zoomHostAccount || "-"}
+                                  </Typography>
+                                </Box>
+                                <Box>
+                                  <Typography variant="caption" color="text.secondary">
+                                    ID de reunión Zoom
+                                  </Typography>
+                                  <Typography variant="body2" sx={{ fontFamily: "monospace", fontWeight: 700 }}>
+                                    {meeting.zoomMeetingId || "-"}
+                                  </Typography>
+                                </Box>
+                                <Box sx={{ gridColumn: { xs: "1 / -1", lg: "span 2" } }}>
+                                  <ZoomAccountPasswordField
+                                    hostAccount={meeting.zoomHostAccount}
+                                    label="Contraseña de la cuenta Zoom"
+                                  />
                                 </Box>
                                 <Box sx={{ gridColumn: { xs: "1 / -1", lg: "span 2" } }}>
                                   <Typography variant="caption" color="text.secondary">
