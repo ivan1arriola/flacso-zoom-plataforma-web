@@ -31,6 +31,9 @@ import ContentCopyIcon from "@mui/icons-material/ContentCopy";
 import CheckIcon from "@mui/icons-material/Check";
 
 import type { Solicitud } from "@/src/services/solicitudesApi";
+import { ZoomAccountPasswordField } from "@/components/spa-tabs/ZoomAccountPasswordField";
+import { MeetingAssistantStatusChip } from "@/components/spa-tabs/MeetingAssistantStatusChip";
+import { resolveMeetingDisplayState } from "@/src/lib/meeting-display";
 
 interface SolicitudDetailDialogProps {
   solicitudId: string | null;
@@ -90,17 +93,6 @@ export function SolicitudDetailDialog({
     }).format(new Date(dateStr));
   };
 
-  const getStatusColor = (status: string) => {
-    switch (status) {
-      case "PROVISIONADA": return "success";
-      case "REGISTRADA": return "info";
-      case "CANCELADA_DOCENTE":
-      case "CANCELADA_ADMIN": return "error";
-      case "SIN_CAPACIDAD_ZOOM": return "warning";
-      default: return "default";
-    }
-  };
-
   const formatTipoInstanciasLabel = (tipoInstancias: string) => {
     switch (tipoInstancias) {
       case "UNICA":
@@ -126,7 +118,7 @@ export function SolicitudDetailDialog({
     >
       <DialogTitle sx={{ m: 0, p: 2, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
         <Typography component="span" variant="h6" sx={{ fontWeight: 800 }}>
-          Detalles del pedido
+          Detalle de reunión
         </Typography>
         <IconButton onClick={onClose} size="small">
           <CloseIcon />
@@ -148,15 +140,12 @@ export function SolicitudDetailDialog({
                 <Typography variant="h5" sx={{ fontWeight: 900, color: "primary.main" }}>
                   {solicitud.titulo}
                 </Typography>
-                <Chip 
-                  label={solicitud.estadoSolicitudVista || solicitud.estadoSolicitud} 
-                  color={getStatusColor(solicitud.estadoSolicitud) as any}
+                <Chip
+                  label={resolveMeetingDisplayState({ requestStatus: solicitud.estadoSolicitudVista || solicitud.estadoSolicitud }).label}
+                  color={resolveMeetingDisplayState({ requestStatus: solicitud.estadoSolicitudVista || solicitud.estadoSolicitud }).tone}
                   sx={{ fontWeight: 700 }}
                 />
               </Stack>
-              <Typography variant="body2" color="text.secondary">
-                ID: {solicitud.id}
-              </Typography>
             </Box>
 
             <Grid container spacing={3}>
@@ -173,6 +162,8 @@ export function SolicitudDetailDialog({
                       </Typography>
                     </Box>
                   </Box>
+
+                  <ZoomAccountPasswordField hostAccount={solicitud.zoomHostAccount} />
 
                   <Box sx={{ display: "flex", alignItems: "center", gap: 1.5 }}>
                     <PersonOutlineOutlinedIcon color="action" />
@@ -310,21 +301,31 @@ export function SolicitudDetailDialog({
                 Fechas de reunión programadas ({solicitud.zoomInstanceCount || 0})
               </Typography>
               <Stack spacing={1}>
-                {solicitud.zoomInstances?.map((instance, idx) => (
+                {solicitud.zoomInstances?.map((instance, idx) => {
+                  const instanceState = resolveMeetingDisplayState({
+                    requestStatus: solicitud.estadoSolicitudVista || solicitud.estadoSolicitud,
+                    eventStatus: instance.estadoEvento,
+                    zoomStatus: instance.status,
+                    coverageStatus: instance.estadoCobertura,
+                    requiresAssistance: instance.requiereAsistencia
+                  });
+                  const instanceMeetingId = instance.meetingId || solicitud.meetingPrincipalId || null;
+                  const instanceHostAccount = instance.hostAccount || solicitud.zoomHostAccount || null;
+                  return (
                   <Paper 
-                    key={idx} 
+                    key={instance.eventId || `${instance.startTime}-${idx}`}
                     variant="outlined" 
                     sx={{ 
                       p: 1.5, 
                       borderRadius: 2, 
-                      display: "flex", 
-                      alignItems: "center", 
-                      justifyContent: "space-between",
+                      display: "grid",
+                      gridTemplateColumns: { xs: "1fr", md: "minmax(0, 1fr) minmax(260px, 0.8fr)" },
+                      gap: 1.5,
                       backgroundColor: instance.status === "deleted" ? "grey.50" : "inherit",
                       opacity: instance.status === "deleted" ? 0.6 : 1
                     }}
                   >
-                    <Box>
+                    <Stack spacing={0.8}>
                       <Typography variant="body2" sx={{ fontWeight: 700 }}>
                         {new Intl.DateTimeFormat("es-UY", { 
                           weekday: "long", 
@@ -334,20 +335,28 @@ export function SolicitudDetailDialog({
                           minute: "2-digit"
                         }).format(new Date(instance.startTime))}
                       </Typography>
-                      <Typography variant="caption" color="text.secondary">
-                        Duración: {instance.durationMinutes} min
+                      <Stack direction="row" spacing={0.8} useFlexGap flexWrap="wrap">
+                        <Chip size="small" label={instanceState.label} color={instanceState.tone} />
+                        <Chip size="small" variant="outlined" label={`${instance.durationMinutes} min`} />
+                        <MeetingAssistantStatusChip
+                          requiresAssistance={Boolean(instance.requiereAsistencia)}
+                          assistantName={instance.monitorNombre}
+                          assistantEmail={instance.monitorEmail}
+                        />
+                      </Stack>
+                    </Stack>
+                    <Stack spacing={0.7}>
+                      <Typography variant="caption" color="text.secondary">Cuenta Zoom</Typography>
+                      <Typography variant="body2">{instanceHostAccount || "-"}</Typography>
+                      <Typography variant="caption" color="text.secondary">ID de reunión Zoom</Typography>
+                      <Typography variant="body2" sx={{ fontFamily: "monospace", fontWeight: 700 }}>
+                        {instanceMeetingId || "-"}
                       </Typography>
-                    </Box>
-                    <Stack direction="row" spacing={1} alignItems="center">
-                      {instance.requiereAsistencia && (
-                        <Chip size="small" label="Asistencia" color="secondary" variant="outlined" sx={{ fontWeight: 700, height: 20, fontSize: "0.6rem" }} />
-                      )}
-                      <Typography variant="caption" sx={{ fontWeight: 700, color: instance.status === "deleted" ? "error.main" : "success.main" }}>
-                        {instance.status === "deleted" ? "Cancelada" : "Activa"}
-                      </Typography>
+                      <ZoomAccountPasswordField hostAccount={instanceHostAccount} size="small" />
                     </Stack>
                   </Paper>
-                ))}
+                  );
+                })}
               </Stack>
             </Box>
           </Stack>

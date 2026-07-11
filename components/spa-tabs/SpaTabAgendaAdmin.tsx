@@ -33,6 +33,7 @@ import {
 import { renotifyOpenAgenda } from "@/src/services/agendaApi";
 import { MeetingAssistantStatusChip } from "@/components/spa-tabs/MeetingAssistantStatusChip";
 import { ZoomAccountPasswordField } from "@/components/spa-tabs/ZoomAccountPasswordField";
+import { resolveMeetingDisplayState } from "@/src/lib/meeting-display";
 import {
   formatModalidad,
   formatZoomDateTime,
@@ -140,13 +141,15 @@ function resolveEventTone(meeting: AgendaMeeting): {
   label: string;
   color: "default" | "info" | "success" | "warning" | "error";
 } {
-  if (meeting.isCancelled) return { label: "Cancelada", color: "error" };
-  if (meeting.estadoEvento === "FINALIZADO" || meeting.isPast) return { label: "Finalizada", color: "default" };
-  if (meeting.estadoEvento === "PROGRAMADO") return { label: "Programada", color: "success" };
-  if (meeting.estadoEvento === "CREADO_ZOOM") return { label: "Creada", color: "info" };
-  if (meeting.estadoEvento === "ERROR_INTEGRACION") return { label: "Error de integración", color: "error" };
-  if (meeting.estadoEvento === "PENDIENTE_CREACION") return { label: "Pendiente", color: "warning" };
-  return { label: meeting.estadoEvento || "Sin estado", color: "default" };
+  const state = resolveMeetingDisplayState({
+    requestStatus: meeting.solicitudEstado,
+    eventStatus: meeting.estadoEvento,
+    zoomStatus: meeting.status,
+    coverageStatus: meeting.estadoCobertura,
+    requiresAssistance: meeting.requiresAssistance,
+    isPast: meeting.isPast
+  });
+  return { label: state.label, color: state.tone };
 }
 
 function resolveCoverageTone(meeting: AgendaMeeting): {

@@ -91,13 +91,13 @@ export const TAB_CONFIG: Record<Tab, TabConfig> = {
     group: "OPERACION"
   },
   solicitudes: {
-    label: "Pedidos",
+    label: "Reuniones",
     visibleInNavigation: true,
     roles: ["ADMINISTRADOR", "DOCENTE"],
     group: "OPERACION"
   },
   agenda_admin: {
-    label: "Agenda general",
+    label: "Agenda",
     visibleInNavigation: true,
     roles: ["ADMINISTRADOR"],
     group: "OPERACION"
@@ -145,13 +145,13 @@ export const TAB_CONFIG: Record<Tab, TabConfig> = {
     group: "ASISTENTES"
   },
   manual: {
-    label: "Asociacion manual",
+    label: "Asociación manual",
     visibleInNavigation: true,
     roles: ["ADMINISTRADOR"],
     group: "OPERACION"
   },
   historico: {
-    label: "Registro historico",
+    label: "Historial",
     visibleInNavigation: true,
     roles: ["ADMINISTRADOR"],
     group: "OPERACION"
@@ -163,19 +163,19 @@ export const TAB_CONFIG: Record<Tab, TabConfig> = {
     group: "ZOOM"
   },
   proximas_zoom: {
-    label: "Reuniones proximas",
+    label: "Próximas en Zoom",
     visibleInNavigation: true,
     roles: ["ADMINISTRADOR"],
     group: "ZOOM"
   },
   pasadas_zoom: {
-    label: "Reuniones pasadas",
+    label: "Pasadas en Zoom",
     visibleInNavigation: true,
     roles: ["ADMINISTRADOR"],
     group: "ZOOM"
   },
   estadisticas: {
-    label: "Estadisticas",
+    label: "Estadísticas",
     visibleInNavigation: true,
     roles: ["ADMINISTRADOR"],
     group: "ADMIN"

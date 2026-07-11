@@ -49,6 +49,7 @@ import {
   buildSolicitudReminderEmailHtml
 } from "@/src/modules/salas/email-templates";
 import type { SessionUser } from "@/src/lib/api-auth";
+import { resolveAssignmentEmailRecipients } from "@/src/lib/meeting-notification-policy";
 
 type InstanceDetailInput = {
   inicioProgramadoAt: string;
@@ -1706,18 +1707,11 @@ async function sendDefinitiveAssignmentEmails(input: {
   asistenteEmail: string;
   responsableEmail: string | null;
 }): Promise<void> {
-  const recipients = new Set<string>();
-  const assistantEmail = input.asistenteEmail.trim().toLowerCase();
-  if (EMAIL_LINE_REGEX.test(assistantEmail)) {
-    recipients.add(assistantEmail);
-  }
-
-  const responsableEmail = (input.responsableEmail ?? "").trim().toLowerCase();
-  if (EMAIL_LINE_REGEX.test(responsableEmail)) {
-    recipients.add(responsableEmail);
-  }
-
-  if (recipients.size === 0) return;
+  const recipients = resolveAssignmentEmailRecipients({
+    responsibleEmail: input.responsableEmail,
+    assignedAssistantEmail: input.asistenteEmail
+  });
+  if (recipients.length === 0) return;
 
   const client = new EmailClient();
   const subject = `Asignacion confirmada: ${input.titulo}`;
@@ -1732,7 +1726,7 @@ async function sendDefinitiveAssignmentEmails(input: {
   });
 
   await Promise.all(
-    Array.from(recipients).map((to) =>
+    recipients.map((to) =>
       client.send({
         to,
         subject,
@@ -1749,7 +1743,7 @@ async function sendDefinitiveAssignmentEmails(input: {
   };
 
   await Promise.all(
-    Array.from(recipients).map((email) =>
+    recipients.map((email) =>
       sendPushToUserByEmail(email, pushPayload).catch((err) =>
         logger.warn("No se pudo enviar notificacion push de asignacion.", {
           email,

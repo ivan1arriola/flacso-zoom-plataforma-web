@@ -1096,7 +1096,7 @@ export function SpaTabSolicitudes({
     if (instances.length === 0) {
       return (
         <Typography variant="body2" color="text.secondary">
-          Este pedido no tiene fechas de reunión disponibles.
+          Esta reunión no tiene fechas disponibles.
         </Typography>
       );
     }
@@ -1420,8 +1420,8 @@ export function SpaTabSolicitudes({
     (!requiresRecurringCreatorInEdit || Boolean(editMeetingForm.docenteCreadorNombre.trim()));
   const isAdminView = viewerRole === "ADMINISTRADOR";
   const isDocenteView = viewerRole === "DOCENTE";
-  const listViewTitle = isDocenteView ? "Mis pedidos" : "Todos los pedidos";
-  const listViewHeading = isDocenteView ? "Listado de mis pedidos" : "Listado de todos los pedidos";
+  const listViewTitle = isDocenteView ? "Mis reuniones" : "Todas las reuniones";
+  const listViewHeading = isDocenteView ? "Listado de mis reuniones" : "Listado de reuniones";
 
   return (
     <Card variant="outlined" sx={{ borderRadius: 3 }}>
@@ -1434,14 +1434,14 @@ export function SpaTabSolicitudes({
           sx={{ mb: 2 }}
         >
           <Typography variant="h5" component="h2" sx={{ fontWeight: 700 }}>
-            {docenteSolicitudesView === "form" ? "Nuevo pedido de reunión" : listViewTitle}
+            {docenteSolicitudesView === "form" ? "Nueva reunión" : listViewTitle}
           </Typography>
 
         </Stack>
         <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
           {docenteSolicitudesView === "form" 
-            ? "Completa el formulario para crear un nuevo pedido de reunión en Zoom."
-            : "Listado de pedidos con estado, solicitante e información de reunión."}
+            ? "Completa el formulario para crear una nueva reunión en Zoom."
+            : "Listado de reuniones con estado e información operativa."}
         </Typography>
 
         <Paper
@@ -1458,7 +1458,7 @@ export function SpaTabSolicitudes({
             Diccionario rápido
           </Typography>
           <Typography variant="body2" color="text.secondary">
-            Pedido: registro principal. Reunión: cada fecha concreta del pedido. Reuniones recurrentes: conjunto de fechas vinculadas al mismo pedido.
+            Cada tarjeta agrupa una reunión y sus fechas. Las reuniones recurrentes comparten configuración y enlace cuando Zoom lo permite.
           </Typography>
         </Paper>
 
@@ -1499,7 +1499,7 @@ export function SpaTabSolicitudes({
                       select
                       value={form.responsable}
                       onChange={(e) => updateForm("responsable", e.target.value)}
-                      helperText="Como admin, puedes delegar este pedido."
+                      helperText="Como administrador, puedes delegar esta reunión."
                     >
                       {responsableOptions.map((option) => (
                         <MenuItem key={option.value} value={option.value}>
@@ -1518,7 +1518,7 @@ export function SpaTabSolicitudes({
                       fullWidth
                       value={form.responsable}
                       disabled
-                      helperText="Corresponde a quien crea el pedido."
+                      helperText="Corresponde a quien crea la reunión."
                     />
                   )}
 
@@ -2173,7 +2173,7 @@ export function SpaTabSolicitudes({
                   boxShadow: isDarkMode ? "0 8px 32px rgba(96, 165, 250, 0.2)" : "0 8px 32px rgba(31, 75, 143, 0.2)"
                 }}
               >
-                {isSubmittingSolicitud ? "Guardando pedido..." : "Crear pedido"}
+                {isSubmittingSolicitud ? "Creando reunión..." : "Crear reunión"}
               </Button>
             </Box>
           </Stack>
@@ -2290,7 +2290,7 @@ export function SpaTabSolicitudes({
                 variant={solicitudesSortMode === "FECHA_SOLICITUD" ? "contained" : "outlined"}
                 onClick={() => setSolicitudesSortMode("FECHA_SOLICITUD")}
               >
-                Fecha de pedido
+                Fecha de creación
               </Button>
             </Stack>
           </Stack>
@@ -2298,13 +2298,13 @@ export function SpaTabSolicitudes({
             <SolicitudesListSkeleton />
           ) : solicitudes.length === 0 ? (
             <Typography variant="body2" color="text.secondary">
-              No hay pedidos registrados.
+              No hay reuniones registradas.
             </Typography>
           ) : visibleSolicitudes.length === 0 ? (
             <Typography variant="body2" color="text.secondary">
               {solicitudesListScope === "ACTIVAS"
-                ? "No hay pedidos activos o pendientes de ocurrir."
-                : "No hay pedidos con todas sus fechas finalizadas."}
+                ? "No hay reuniones activas o pendientes."
+                : "No hay reuniones finalizadas."}
             </Typography>
           ) : null}
           {visibleSolicitudes.length > 0 && !isLoading && (
