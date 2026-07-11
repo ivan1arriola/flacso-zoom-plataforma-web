@@ -1043,7 +1043,12 @@ export function SpaHomeScreen() {
       )}
 
       {tab === "agenda_admin" && canSeeAgendaAdmin && (
-        <SpaTabAgendaAdmin solicitudes={solicitudes} />
+        <SpaTabAgendaAdmin
+          solicitudes={solicitudes}
+          isLoading={
+            isLoadingSolicitudes || !loadedResourceKeysRef.current.has("solicitudes")
+          }
+        />
       )}
 
       {tab === "solicitudes" && canSeeSolicitudes && (

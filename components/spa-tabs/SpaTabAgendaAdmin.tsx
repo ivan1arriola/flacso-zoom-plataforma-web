@@ -12,6 +12,7 @@ import {
   Link,
   MenuItem,
   Paper,
+  Skeleton,
   Stack,
   TextField,
   ToggleButton,
@@ -49,6 +50,7 @@ type AgendaAssistanceFilter =
 
 interface SpaTabAgendaAdminProps {
   solicitudes: Solicitud[];
+  isLoading?: boolean;
 }
 
 function getDayKey(value: string): string {
@@ -235,7 +237,7 @@ function buildDayGroups(meetings: AgendaMeeting[]): Array<{ key: string; label: 
     .sort((left, right) => left.key.localeCompare(right.key));
 }
 
-export function SpaTabAgendaAdmin({ solicitudes }: SpaTabAgendaAdminProps) {
+export function SpaTabAgendaAdmin({ solicitudes, isLoading = false }: SpaTabAgendaAdminProps) {
   const theme = useTheme();
   const [scope, setScope] = useState<AgendaScope>("PROXIMAS");
   const [assistanceFilter, setAssistanceFilter] = useState<AgendaAssistanceFilter>("TODAS");
@@ -314,7 +316,7 @@ export function SpaTabAgendaAdmin({ solicitudes }: SpaTabAgendaAdminProps) {
             </Alert>
           ) : null}
 
-          {unscheduledRequests > 0 ? (
+          {!isLoading && unscheduledRequests > 0 ? (
             <Alert severity="info" sx={{ borderRadius: 2 }}>
               Hay {unscheduledRequests} pedido(s) sin instancias Zoom visibles todavía. Esta agenda muestra
               solamente reuniones con fecha concreta.
@@ -367,7 +369,30 @@ export function SpaTabAgendaAdmin({ solicitudes }: SpaTabAgendaAdminProps) {
             />
           </Stack>
 
-          <Stack direction="row" spacing={1} useFlexGap flexWrap="wrap">
+          {isLoading ? (
+            <Stack spacing={2} aria-label="Cargando agenda general">
+              <Stack direction="row" spacing={1} useFlexGap flexWrap="wrap">
+                <Skeleton variant="rounded" width={130} height={32} />
+                <Skeleton variant="rounded" width={120} height={32} />
+                <Skeleton variant="rounded" width={190} height={32} />
+              </Stack>
+              {[0, 1, 2].map((item) => (
+                <Box
+                  key={item}
+                  sx={{
+                    display: "grid",
+                    gridTemplateColumns: { xs: "1fr", md: "120px 1fr" },
+                    gap: 1.2
+                  }}
+                >
+                  <Skeleton variant="rounded" height={76} />
+                  <Skeleton variant="rounded" height={220} />
+                </Box>
+              ))}
+            </Stack>
+          ) : null}
+
+          {!isLoading ? <Stack direction="row" spacing={1} useFlexGap flexWrap="wrap">
             <Chip label={`${summary.meetings} reuniones`} color="primary" variant="outlined" />
             <Chip label={`${summary.programs} programas`} variant="outlined" />
             <Chip label={`${summary.assigned} con asistencia asignada`} color="success" variant="outlined" />
@@ -375,15 +400,15 @@ export function SpaTabAgendaAdmin({ solicitudes }: SpaTabAgendaAdminProps) {
             {summary.cancelled > 0 ? (
               <Chip label={`${summary.cancelled} canceladas`} color="error" variant="outlined" />
             ) : null}
-          </Stack>
+          </Stack> : null}
 
-          {visibleMeetings.length === 0 ? (
+          {!isLoading && visibleMeetings.length === 0 ? (
             <Alert severity="info" sx={{ borderRadius: 2 }}>
               No hay reuniones para los filtros seleccionados.
             </Alert>
           ) : null}
 
-          {visibleMeetings.length > 0 ? (
+          {!isLoading && visibleMeetings.length > 0 ? (
             <Stack spacing={2}>
               {timelineGroups.map((group) => (
                 <Box key={group.key}>
