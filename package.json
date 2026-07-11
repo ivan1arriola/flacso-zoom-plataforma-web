@@ -8,6 +8,8 @@
   "scripts": {
     "dev": "NEXT_DIST_DIR=.next-dev next dev",
     "test:db": "node scripts/test-db-connection.js",
+    "audit:recurring-invariant": "node scripts/audit-recurring-meeting-invariant.js",
+    "audit:recurring-invariant:fix": "node scripts/audit-recurring-meeting-invariant.js --fix",
     "build": "npm run db:generate && npm run test:db && next build",
     "start": "next start",
     "check": "tsc --noEmit",

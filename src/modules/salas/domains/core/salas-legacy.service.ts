@@ -6257,6 +6257,7 @@ export class SalasLegacyService {
       select: {
         id: true,
         solicitudSalaId: true,
+        cuentaZoomId: true,
         modalidadReunion: true,
         inicioProgramadoAt: true,
         finProgramadoAt: true,
@@ -7335,6 +7336,11 @@ export class SalasLegacyService {
     }
 
     const primaryMeetingId = normalizeZoomMeetingId(solicitud.meetingPrincipalId);
+    if (!primaryMeetingId) {
+      throw new Error(
+        "La reunión recurrente no tiene un ID principal de Zoom. No se puede agregar una fecha sin romper la serie."
+      );
+    }
     const fallbackJoinUrl = primaryMeetingId ? buildZoomJoinUrlFromMeetingId(primaryMeetingId) : null;
     const primaryJoinUrl =
       solicitud.eventos.find((event) => (event.zoomJoinUrl ?? "").trim())?.zoomJoinUrl ??
@@ -7366,11 +7372,17 @@ export class SalasLegacyService {
       }
     });
 
-    // Regla operativa: usar el mismo ID siempre que sea posible.
-    let requiresNewMeetingId = overlapsInAssignedAccount > 0 || !primaryMeetingId;
+    if (overlapsInAssignedAccount > 0) {
+      throw new Error(
+        "La nueva fecha se superpone con otra reunión de la misma cuenta Zoom. Elige otro horario para mantener el host y el ID de la serie."
+      );
+    }
+
+    // Invariante de serie: nunca crear un ID o host alternativo.
+    let requiresNewMeetingId = false;
 
     let selectedAccount = assignedAccount;
-    let eventMeetingId: string | null = null;
+    let eventMeetingId: string | null = primaryMeetingId;
     let eventJoinUrl: string | null = primaryJoinUrl;
     let eventStartUrl: string | null = null;
     let eventZoomPayload: Prisma.InputJsonValue | undefined;
@@ -7436,7 +7448,7 @@ export class SalasLegacyService {
           }
         }
       } catch (error) {
-        logger.warn("No se pudo extender la reunion principal en Zoom; se intentara crear la instancia con nuevo ID.", {
+        logger.warn("No se pudo extender la reunion principal en Zoom; se rechazara la nueva fecha para conservar la serie.", {
           solicitudId: solicitud.id,
           meetingPrincipalId: primaryMeetingId,
           error: error instanceof Error ? error.message : String(error)
@@ -7446,45 +7458,9 @@ export class SalasLegacyService {
     }
 
     if (requiresNewMeetingId) {
-      const singlePlan: InstancePlan[] = [{ inicio, fin }];
-      const availableAccounts = await listAvailableCuentaZoomCandidatesForAllInstances(singlePlan);
-      const shouldPreferDifferentAccount = overlapsInAssignedAccount > 0;
-      const preferredCandidate = shouldPreferDifferentAccount
-        ? availableAccounts.find((account) => account.id !== assignedAccount.id)
-        : availableAccounts.find((account) => account.id === assignedAccount.id);
-      selectedAccount = preferredCandidate ?? availableAccounts[0] ?? assignedAccount;
-
-      const zoomUserRef = resolveZoomUserRefForCuenta(selectedAccount);
-      if (!zoomUserRef) {
-        throw new Error("La cuenta Zoom seleccionada no tiene referencia valida para crear una reunion.");
-      }
-
-      const zoomClient = await ZoomMeetingsClient.fromAccountCredentials();
-      const hostRef = await resolveZoomHostEmail(zoomUserRef, zoomClient);
-      const desiredAutoRecording = solicitud.requiereGrabacion ? "cloud" : "none";
-
-      const createdData = await zoomClient.createMeeting(hostRef, {
-        topic: solicitud.titulo,
-        type: 2,
-        start_time: formatZoomDateTimeInTimezone(inicio, timezone),
-        duration: durationMinutes,
-        timezone,
-        settings: {
-          waiting_room: true,
-          auto_recording: desiredAutoRecording
-        }
-      });
-
-      const createdSnapshot = parseZoomMeetingSnapshot(createdData);
-      const readSnapshot = await fetchZoomMeetingSnapshot(zoomClient, createdSnapshot.meetingId);
-      const effectiveSnapshot = readSnapshot ?? createdSnapshot;
-
-      eventMeetingId = effectiveSnapshot.meetingId;
-      eventJoinUrl = effectiveSnapshot.joinUrl ?? eventJoinUrl;
-      eventStartUrl = effectiveSnapshot.startUrl ?? null;
-      eventZoomPayload = effectiveSnapshot.rawPayload;
-      synchronizedAt = new Date();
-      createdDedicatedMeetingIdForRollback = effectiveSnapshot.meetingId;
+      throw new Error(
+        "Zoom no pudo incorporar la fecha al ID principal de la reunión recurrente. No se creó una reunión separada."
+      );
     }
 
     let createdEvent: { id: string };
@@ -8008,6 +7984,16 @@ export class SalasLegacyService {
     );
     const primaryMeetingId = normalizeZoomMeetingId(solicitud.meetingPrincipalId);
     const currentTargetMeetingId = normalizeZoomMeetingId(targetEvent.zoomMeetingId);
+    if (!primaryMeetingId) {
+      throw new Error(
+        "La reunión recurrente no tiene un ID principal de Zoom. No se puede reactivar la fecha sin romper la serie."
+      );
+    }
+    if (currentTargetMeetingId && currentTargetMeetingId !== primaryMeetingId) {
+      throw new Error(
+        "La fecha tiene un ID distinto al principal de la serie y requiere corrección administrativa antes de reactivarse."
+      );
+    }
     const accountId =
       targetEvent.cuentaZoomId ??
       solicitud.cuentaZoomAsignadaId ??
@@ -8041,51 +8027,9 @@ export class SalasLegacyService {
     let sourceLabel = "SIN_CAMBIOS";
 
     const ensureDedicatedMeeting = async () => {
-      const singlePlan: InstancePlan[] = [
-        {
-          inicio: targetEvent.inicioProgramadoAt,
-          fin: targetEvent.finProgramadoAt
-        }
-      ];
-      const availableAccounts = await listAvailableCuentaZoomCandidatesForAllInstances(singlePlan);
-      selectedAccount =
-        availableAccounts.find((account) => account.id === assignedAccount.id) ??
-        availableAccounts[0] ??
-        assignedAccount;
-
-      const zoomUserRef = resolveZoomUserRefForCuenta(selectedAccount);
-      if (!zoomUserRef) {
-        throw new Error("La cuenta Zoom seleccionada no tiene referencia valida para sincronizar la instancia.");
-      }
-
-      const zoomClient = await ZoomMeetingsClient.fromAccountCredentials();
-      const hostRef = await resolveZoomHostEmail(zoomUserRef, zoomClient);
-      const desiredAutoRecording = solicitud.requiereGrabacion ? "cloud" : "none";
-
-      const createdData = await zoomClient.createMeeting(hostRef, {
-        topic: solicitud.titulo,
-        type: 2,
-        start_time: formatZoomDateTimeInTimezone(targetEvent.inicioProgramadoAt, timezone),
-        duration: durationMinutes,
-        timezone,
-        settings: {
-          waiting_room: true,
-          auto_recording: desiredAutoRecording
-        }
-      });
-
-      const createdSnapshot = parseZoomMeetingSnapshot(createdData);
-      const refreshedSnapshot = await fetchZoomMeetingSnapshot(zoomClient, createdSnapshot.meetingId);
-      const effectiveSnapshot = refreshedSnapshot ?? createdSnapshot;
-
-      resolvedMeetingId = effectiveSnapshot.meetingId;
-      resolvedJoinUrl = effectiveSnapshot.joinUrl ?? buildZoomJoinUrlFromMeetingId(effectiveSnapshot.meetingId);
-      resolvedStartUrl = effectiveSnapshot.startUrl ?? null;
-      resolvedPayload = effectiveSnapshot.rawPayload;
-      synchronizedAt = new Date();
-      occurrenceId = null;
-      usedPrimaryMeeting = false;
-      sourceLabel = "MEETING_DEDICADO";
+      throw new Error(
+        "Zoom no pudo reactivar la fecha dentro del ID principal de la serie. No se creó una reunión separada."
+      );
     };
 
     if (currentTargetMeetingId && currentTargetMeetingId !== primaryMeetingId) {
@@ -8187,7 +8131,7 @@ export class SalasLegacyService {
           }
 
           if (!shouldFallbackToDedicated && matchedOccurrence) {
-            resolvedMeetingId = null;
+            resolvedMeetingId = primaryMeetingId;
             resolvedJoinUrl = matchedOccurrence.joinUrl ?? primarySnapshot.joinUrl ?? resolvedJoinUrl;
             resolvedStartUrl = primarySnapshot.startUrl ?? null;
             resolvedPayload = primarySnapshot.rawPayload;
@@ -10033,6 +9977,7 @@ export class SalasLegacyService {
       select: {
         id: true,
         solicitudSalaId: true,
+        cuentaZoomId: true,
         modalidadReunion: true,
         inicioProgramadoAt: true,
         finProgramadoAt: true,
@@ -10057,7 +10002,9 @@ export class SalasLegacyService {
             docentesCorreos: true,
             descripcion: true,
             timezone: true,
+            tipoInstancias: true,
             meetingPrincipalId: true,
+            cuentaZoomAsignadaId: true,
             docente: {
               select: {
                 usuarioId: true
@@ -10311,6 +10258,24 @@ export class SalasLegacyService {
 
     const dedicatedMeetingId = normalizeZoomMeetingId(event.zoomMeetingId);
     const primaryMeetingId = normalizeZoomMeetingId(event.solicitud.meetingPrincipalId);
+    const isRecurringMeeting = event.solicitud.tipoInstancias !== TipoInstancias.UNICA;
+    if (isRecurringMeeting && !primaryMeetingId) {
+      throw new Error("La reunión recurrente no tiene un ID principal de Zoom.");
+    }
+    if (isRecurringMeeting && dedicatedMeetingId && dedicatedMeetingId !== primaryMeetingId) {
+      throw new Error(
+        "Esta fecha tiene un ID de Zoom distinto al de la serie. Debe corregirse antes de modificarla."
+      );
+    }
+    if (
+      isRecurringMeeting &&
+      event.solicitud.cuentaZoomAsignadaId &&
+      event.cuentaZoomId !== event.solicitud.cuentaZoomAsignadaId
+    ) {
+      throw new Error(
+        "Esta fecha tiene una cuenta anfitriona distinta a la de la serie. Debe corregirse antes de modificarla."
+      );
+    }
     const shouldSyncZoom =
       (titleChanged || descriptionChanged || scheduleChanged) &&
       !(canManageAsAdmin && isPastOrClosedTarget);
@@ -10411,6 +10376,7 @@ export class SalasLegacyService {
           inicioProgramadoAt: nextStart,
           finProgramadoAt: nextEnd,
           timezone: nextTimezone,
+          zoomMeetingId: isRecurringMeeting ? primaryMeetingId : undefined,
           zoomJoinUrl: resolvedJoinUrl,
           zoomPayloadUltimo: resolvedPayload,
           sincronizadoConZoomAt: synchronizedAt ?? undefined,
