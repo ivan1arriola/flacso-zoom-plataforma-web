@@ -2058,6 +2058,28 @@ function findZoomOccurrenceByStart(
   return best;
 }
 
+async function refreshZoomMeetingUntil(
+  zoomClient: ZoomMeetingsClient,
+  meetingId: string,
+  predicate: (snapshot: ZoomMeetingSnapshot) => boolean
+): Promise<ZoomMeetingSnapshot | null> {
+  const delaysMs = [0, 250, 500, 1_000];
+  let lastSnapshot: ZoomMeetingSnapshot | null = null;
+
+  for (const delayMs of delaysMs) {
+    if (delayMs > 0) {
+      await new Promise<void>((resolve) => setTimeout(resolve, delayMs));
+    }
+
+    const snapshot = await fetchZoomMeetingSnapshot(zoomClient, meetingId);
+    if (!snapshot) return null;
+    lastSnapshot = snapshot;
+    if (predicate(snapshot)) return snapshot;
+  }
+
+  return lastSnapshot;
+}
+
 function findAnyZoomOccurrenceByStart(
   instances: ZoomOccurrenceSnapshot[],
   expectedStart: Date
@@ -7374,16 +7396,18 @@ export class SalasLegacyService {
     }
 
     // Invariante de serie: nunca crear un ID o host alternativo.
+    // Las instancias secundarias dejan zoomMeetingId en null porque el ID efectivo
+    // vive en SolicitudSala.meetingPrincipalId y EventoZoom.zoomMeetingId es unico.
     let requiresNewMeetingId = false;
 
-    let selectedAccount = assignedAccount;
-    let eventMeetingId: string | null = primaryMeetingId;
+    const selectedAccount = assignedAccount;
+    const eventMeetingId: string | null = null;
     let eventJoinUrl: string | null = primaryJoinUrl;
     let eventStartUrl: string | null = null;
     let eventZoomPayload: Prisma.InputJsonValue | undefined;
     let synchronizedAt: Date | null = null;
-    let createdDedicatedMeetingIdForRollback: string | null = null;
-    let createdPrimaryOccurrenceIdForRollback: string | null = null;
+    let recurrencePayloadForRollback: ZoomRecurrencePayload | null = null;
+    let recurrenceWasMutated = false;
 
     if (!requiresNewMeetingId && primaryMeetingId) {
       try {
@@ -7396,20 +7420,70 @@ export class SalasLegacyService {
           let matchedOccurrence = findZoomOccurrenceByStart(primarySnapshot.instances, inicio);
 
           if (!matchedOccurrence) {
-            const recurrencePayload = buildZoomRecurrencePayloadFromMeetingSnapshot(primarySnapshot);
+            let recurrencePayload = buildZoomRecurrencePayloadFromMeetingSnapshot(primarySnapshot);
             let updatedRecurrence = false;
+
+            const deletedOccurrence = findAnyZoomOccurrenceByStart(primarySnapshot.instances, inicio);
+            const hasActiveOccurrenceAfterTarget = primarySnapshot.instances.some((instance) => (
+              instance.status !== "deleted" &&
+              new Date(instance.startTime).getTime() > inicio.getTime()
+            ));
+
+            // Un rollback antiguo borraba la ocurrencia recien creada. Si es la cola
+            // de la serie, recortar y volver a extender regenera esa fecha en Zoom.
+            if (
+              deletedOccurrence?.status === "deleted" &&
+              recurrencePayload?.end_times &&
+              !hasActiveOccurrenceAfterTarget
+            ) {
+              const activeOccurrences = Math.max(
+                1,
+                countActiveZoomOccurrences(primarySnapshot.instances)
+              );
+              const truncatedRecurrence: ZoomRecurrencePayload = {
+                ...recurrencePayload,
+                end_times: activeOccurrences
+              };
+              delete truncatedRecurrence.end_date_time;
+
+              await zoomClient.updateMeeting(primaryMeetingId, {
+                recurrence: normalizeRecurrenceForTimezone(truncatedRecurrence, timezone)
+              });
+              recurrenceWasMutated = true;
+              recurrencePayloadForRollback = truncatedRecurrence;
+
+              const truncatedSnapshot = await refreshZoomMeetingUntil(
+                zoomClient,
+                primaryMeetingId,
+                (snapshot) => !findAnyZoomOccurrenceByStart(snapshot.instances, inicio)
+              );
+              if (!truncatedSnapshot) {
+                requiresNewMeetingId = true;
+              } else {
+                primarySnapshot = truncatedSnapshot;
+                recurrencePayload =
+                  buildZoomRecurrencePayloadFromMeetingSnapshot(primarySnapshot) ??
+                  truncatedRecurrence;
+              }
+            }
 
             if (recurrencePayload) {
               if (recurrencePayload.end_date_time) {
                 const parsedRecurrenceEnd = new Date(recurrencePayload.end_date_time);
                 if (Number.isNaN(parsedRecurrenceEnd.getTime()) || parsedRecurrenceEnd < inicio) {
+                  recurrencePayloadForRollback ??= {
+                    ...recurrencePayload
+                  };
                   recurrencePayload.end_date_time = formatZoomDateTimeInTimezone(inicio, timezone);
                   updatedRecurrence = true;
                 }
               } else {
                 const activeOccurrences = Math.max(1, countActiveZoomOccurrences(primarySnapshot.instances));
                 const requiredEndTimes = Math.max(activeOccurrences + 1, nextInstanceCount);
-                if (requiredEndTimes <= 50) {
+                if (requiredEndTimes <= 60 && recurrencePayload.end_times !== requiredEndTimes) {
+                  recurrencePayloadForRollback ??= {
+                    ...recurrencePayload
+                  };
                   recurrencePayload.end_times = requiredEndTimes;
                   delete recurrencePayload.end_date_time;
                   updatedRecurrence = true;
@@ -7421,7 +7495,12 @@ export class SalasLegacyService {
               await zoomClient.updateMeeting(primaryMeetingId, {
                 recurrence: normalizeRecurrenceForTimezone(recurrencePayload, timezone)
               });
-              const refreshedSnapshot = await fetchZoomMeetingSnapshot(zoomClient, primaryMeetingId);
+              recurrenceWasMutated = true;
+              const refreshedSnapshot = await refreshZoomMeetingUntil(
+                zoomClient,
+                primaryMeetingId,
+                (snapshot) => Boolean(findZoomOccurrenceByStart(snapshot.instances, inicio))
+              );
               if (refreshedSnapshot) {
                 primarySnapshot = refreshedSnapshot;
               }
@@ -7430,8 +7509,6 @@ export class SalasLegacyService {
             matchedOccurrence = findZoomOccurrenceByStart(primarySnapshot.instances, inicio);
             if (!matchedOccurrence) {
               requiresNewMeetingId = true;
-            } else if (updatedRecurrence) {
-              createdPrimaryOccurrenceIdForRollback = matchedOccurrence.occurrenceId ?? null;
             }
           }
 
@@ -7453,6 +7530,20 @@ export class SalasLegacyService {
     }
 
     if (requiresNewMeetingId) {
+      if (recurrenceWasMutated && recurrencePayloadForRollback) {
+        try {
+          const rollbackClient = await ZoomMeetingsClient.fromAccountCredentials();
+          await rollbackClient.updateMeeting(primaryMeetingId, {
+            recurrence: normalizeRecurrenceForTimezone(recurrencePayloadForRollback, timezone)
+          });
+        } catch (rollbackError) {
+          logger.error("No se pudo restaurar la recurrencia de Zoom despues de rechazar una nueva fecha.", {
+            solicitudId: solicitud.id,
+            meetingPrincipalId: primaryMeetingId,
+            error: rollbackError instanceof Error ? rollbackError.message : String(rollbackError)
+          });
+        }
+      }
       throw new Error(
         "Zoom no pudo incorporar la fecha al ID principal de la reunión recurrente. No se creó una reunión separada."
       );
@@ -7515,7 +7606,8 @@ export class SalasLegacyService {
               finProgramadoAt: fin.toISOString(),
               requiresAssistance,
               usaMeetingPrincipal: !requiresNewMeetingId,
-              nuevoMeetingId: eventMeetingId
+              meetingPrincipalId: primaryMeetingId,
+              nuevoMeetingId: null
             }
           }
         });
@@ -7523,31 +7615,18 @@ export class SalasLegacyService {
         return event;
       });
     } catch (error) {
-      if (createdDedicatedMeetingIdForRollback) {
+      if (recurrenceWasMutated && recurrencePayloadForRollback) {
         try {
           const rollbackClient = await ZoomMeetingsClient.fromAccountCredentials();
-          await rollbackClient.deleteMeeting(createdDedicatedMeetingIdForRollback, {
-            schedule_for_reminder: false,
-            cancel_meeting_reminder: false
+          await rollbackClient.updateMeeting(primaryMeetingId, {
+            recurrence: normalizeRecurrenceForTimezone(recurrencePayloadForRollback, timezone)
           });
-        } catch {
-          try {
-            const rollbackClient = await ZoomMeetingsClient.fromAccountCredentials();
-            await rollbackClient.updateMeetingStatus(createdDedicatedMeetingIdForRollback, "end");
-          } catch {
-            // Best effort rollback only.
-          }
-        }
-      } else if (primaryMeetingId && createdPrimaryOccurrenceIdForRollback) {
-        try {
-          const rollbackClient = await ZoomMeetingsClient.fromAccountCredentials();
-          await rollbackClient.deleteMeeting(primaryMeetingId, {
-            occurrence_id: createdPrimaryOccurrenceIdForRollback,
-            schedule_for_reminder: false,
-            cancel_meeting_reminder: false
+        } catch (rollbackError) {
+          logger.error("No se pudo restaurar la recurrencia de Zoom despues de un error local.", {
+            solicitudId: solicitud.id,
+            meetingPrincipalId: primaryMeetingId,
+            error: rollbackError instanceof Error ? rollbackError.message : String(rollbackError)
           });
-        } catch {
-          // Best effort rollback only.
         }
       }
       throw error;

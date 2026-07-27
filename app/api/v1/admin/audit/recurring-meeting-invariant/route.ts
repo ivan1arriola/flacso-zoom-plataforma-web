@@ -72,18 +72,10 @@ export async function GET() {
       instanceAccountId: string;
       seriesAccountId: string;
     }>;
-    missingMeetingId: Array<{
-      solicitudId: string;
-      titulo: string;
-      eventoId: string;
-      fecha: string;
-      seriesMeetingId: string;
-    }>;
   } = {
     noPrincipalId: [],
     wrongMeetingId: [],
     wrongAccount: [],
-    missingMeetingId: [],
   };
 
   for (const sol of solicitudes) {
@@ -115,16 +107,6 @@ export async function GET() {
         });
       }
 
-      if (!evMeetingId && primary) {
-        violations.missingMeetingId.push({
-          solicitudId: sol.id,
-          titulo: sol.titulo,
-          eventoId: ev.id,
-          fecha: ev.inicioProgramadoAt.toISOString(),
-          seriesMeetingId: primary,
-        });
-      }
-
       if (sol.cuentaZoomAsignadaId && ev.cuentaZoomId !== sol.cuentaZoomAsignadaId) {
         violations.wrongAccount.push({
           solicitudId: sol.id,
@@ -141,8 +123,7 @@ export async function GET() {
   const totalViolations =
     violations.noPrincipalId.length +
     violations.wrongMeetingId.length +
-    violations.wrongAccount.length +
-    violations.missingMeetingId.length;
+    violations.wrongAccount.length;
 
   return NextResponse.json({
     totalSolicitudes: solicitudes.length,

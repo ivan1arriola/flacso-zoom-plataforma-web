@@ -5,7 +5,9 @@
  *  1. Instancias con zoomMeetingId distinto al meetingPrincipalId de la solicitud
  *  2. Instancias con cuentaZoomId distinta a cuentaZoomAsignadaId de la solicitud
  *  3. Solicitudes recurrentes sin meetingPrincipalId (serie rota)
- *  4. Instancias con zoomMeetingId null cuando la serie tiene un meetingPrincipalId
+ *
+ * En las instancias secundarias, zoomMeetingId debe quedar null: el ID efectivo
+ * se hereda de SolicitudSala.meetingPrincipalId y la columna es unica.
  *
  * Uso:
  *   node scripts/audit-recurring-meeting-invariant.js           # solo detección
@@ -61,7 +63,6 @@ async function main() {
     noPrincipalId: [],           // series sin meetingPrincipalId
     wrongMeetingId: [],          // instances with zoomMeetingId != meetingPrincipalId
     wrongAccount: [],            // instances with cuentaZoomId != cuentaZoomAsignadaId
-    missingMeetingId: [],        // instances with null zoomMeetingId but series has one
   };
 
   for (const sol of solicitudes) {
@@ -90,17 +91,6 @@ async function main() {
           eventoId: ev.id,
           fecha: ev.inicioProgramadoAt.toISOString(),
           instanceMeetingId: evMeetingId,
-          seriesMeetingId: primary,
-        });
-      }
-
-      // Check: instance has null meeting ID but series has one
-      if (!evMeetingId && primary) {
-        violations.missingMeetingId.push({
-          solicitudId: sol.id,
-          titulo: sol.titulo,
-          eventoId: ev.id,
-          fecha: ev.inicioProgramadoAt.toISOString(),
           seriesMeetingId: primary,
         });
       }
@@ -142,16 +132,6 @@ async function main() {
     }
   }
 
-  if (violations.missingMeetingId.length > 0) {
-    totalViolations += violations.missingMeetingId.length;
-    console.log(`\n🟡 INSTANCIAS SIN ID PERO SERIE TIENE UNO (${violations.missingMeetingId.length}):`);
-    console.log(`   Estas instancias no tienen zoomMeetingId pero la serie sí tiene meetingPrincipalId.\n`);
-    for (const v of violations.missingMeetingId) {
-      console.log(`   - [${v.solicitudId}] "${v.titulo}"`);
-      console.log(`     Evento: ${v.eventoId} (${v.fecha}) | Series: ${v.seriesMeetingId}`);
-    }
-  }
-
   if (violations.wrongAccount.length > 0) {
     totalViolations += violations.wrongAccount.length;
     console.log(`\n❌ INSTANCIAS CON CUENTA DIFERENTE A LA SERIE (${violations.wrongAccount.length}):`);
@@ -189,20 +169,6 @@ async function main() {
         data: { zoomMeetingId: v.seriesMeetingId },
       });
       console.log(`   ✅ Corregido zoomMeetingId en evento ${v.eventoId} → ${v.seriesMeetingId}`);
-      fixed++;
-    } catch (e) {
-      console.error(`   ❌ Error al corregir evento ${v.eventoId}: ${e.message}`);
-    }
-  }
-
-  // Fix missingMeetingId: set instance's zoomMeetingId to the series primary
-  for (const v of violations.missingMeetingId) {
-    try {
-      await prisma.eventoZoom.update({
-        where: { id: v.eventoId },
-        data: { zoomMeetingId: v.seriesMeetingId },
-      });
-      console.log(`   ✅ Asignado zoomMeetingId en evento ${v.eventoId} → ${v.seriesMeetingId}`);
       fixed++;
     } catch (e) {
       console.error(`   ❌ Error al corregir evento ${v.eventoId}: ${e.message}`);
