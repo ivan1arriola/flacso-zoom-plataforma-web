@@ -1,6 +1,6 @@
 # FLACSO Zoom Plataforma Web
 
-> Estado: retirado de uso operativo desde la migracion a `../gestor-flacso-google-meet`.
+> Estado: retirado de uso operativo desde la migracion a `../flacso-meet`, la aplicacion vigente.
 > Este repositorio queda como referencia historica/legado Zoom. No implementar aca cambios nuevos de UI o flujo para Google Meet.
 
 App web principal para gestion institucional de solicitudes Zoom, cobertura de asistencia, asignaciones y base economica.
