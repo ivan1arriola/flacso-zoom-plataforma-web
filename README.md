@@ -1,5 +1,8 @@
 # FLACSO Zoom Plataforma Web
 
+> Estado: retirado de uso operativo desde la migracion a `../gestor-flacso-google-meet`.
+> Este repositorio queda como referencia historica/legado Zoom. No implementar aca cambios nuevos de UI o flujo para Google Meet.
+
 App web principal para gestion institucional de solicitudes Zoom, cobertura de asistencia, asignaciones y base economica.
 
 Este proyecto representa la capa web pensada para Vercel. La sincronizacion de grabaciones Zoom/Drive vive por separado en `../flacso-zoom-sincronizador-desktop`.
